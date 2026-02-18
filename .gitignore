@@ -1,0 +1,49 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Build outputs
+dist/
+.next/
+out/
+*.js.map
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+
+# ML artifacts (models are large binary files)
+ml-service/versions/*.joblib
+ml-service/data/*.csv
+ml-service/data/*.parquet
+ml-service/data/snapshots/
+ml-service/data/baselines/
+ml-service/data/scheduler_state.json
+
+# Keep the meta JSON files for version tracking
+!ml-service/versions/*_meta.json
+
+# Docker volumes
+postgres_data/
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# OS files
+Thumbs.db

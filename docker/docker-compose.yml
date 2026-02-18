@@ -1,0 +1,142 @@
+version: '3.9'
+
+services:
+  # ============================================
+  # PostgreSQL Database
+  # ============================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: codfraud-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: codfraud_db
+      POSTGRES_USER: codfraud
+      POSTGRES_PASSWORD: codfraud_secret
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../backend/src/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codfraud -d codfraud_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - codfraud-net
+
+  # ============================================
+  # Redis
+  # ============================================
+  redis:
+    image: redis:7-alpine
+    container_name: codfraud-redis
+    restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - codfraud-net
+
+  # ============================================
+  # Backend API (Node.js / Fastify)
+  # ============================================
+  backend:
+    build:
+      context: ../backend
+      dockerfile: ../docker/Dockerfile.backend
+    container_name: codfraud-backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOST: 0.0.0.0
+      DATABASE_URL: postgresql://codfraud:codfraud_secret@postgres:5432/codfraud_db
+      REDIS_URL: redis://redis:6379
+      ML_SERVICE_URL: http://ml-service:8000
+      JWT_SECRET: change-this-to-a-secure-secret-in-production
+      QUEUE_CONCURRENCY: 5
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - codfraud-net
+
+  # ============================================
+  # ML Service (Python / FastAPI)
+  # ============================================
+  ml-service:
+    build:
+      context: ../ml-service
+      dockerfile: ../docker/Dockerfile.ml
+    container_name: codfraud-ml
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://codfraud:codfraud_secret@postgres:5432/codfraud_db
+      MODEL_DIR: /app/versions
+      LOG_LEVEL: info
+    ports:
+      - "8000:8000"
+    volumes:
+      - ml_models:/app/versions
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - codfraud-net
+
+  # ============================================
+  # Frontend (Next.js)
+  # ============================================
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: ../docker/Dockerfile.frontend
+    container_name: codfraud-frontend
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:3000/api/v1
+    ports:
+      - "3001:3000"
+    depends_on:
+      - backend
+    networks:
+      - codfraud-net
+
+  # ============================================
+  # Nginx Reverse Proxy
+  # ============================================
+  nginx:
+    image: nginx:alpine
+    container_name: codfraud-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ../infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - codfraud-net
+
+volumes:
+  postgres_data:
+  redis_data:
+  ml_models:
+
+networks:
+  codfraud-net:
+    driver: bridge

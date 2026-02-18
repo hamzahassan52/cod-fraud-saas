@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: codfraud-ml-service
+  labels:
+    app: codfraud-ml
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: codfraud-ml
+  template:
+    metadata:
+      labels:
+        app: codfraud-ml
+    spec:
+      containers:
+        - name: ml-service
+          image: codfraud/ml-service:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: codfraud-secrets
+                  key: database-url
+            - name: MODEL_DIR
+              value: /app/versions
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: 2000m
+              memory: 1Gi
+          volumeMounts:
+            - name: model-storage
+              mountPath: /app/versions
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+      volumes:
+        - name: model-storage
+          persistentVolumeClaim:
+            claimName: ml-models-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: codfraud-ml-service
+spec:
+  selector:
+    app: codfraud-ml
+  ports:
+    - port: 8000
+      targetPort: 8000
+  type: ClusterIP
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ml-models-pvc
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 5Gi

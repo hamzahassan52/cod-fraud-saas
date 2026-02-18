@@ -1,0 +1,40 @@
+version: '3.9'
+
+# Lightweight local test: just DB + Redis + ML
+# Backend runs locally with npm run dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: codfraud-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: codfraud_db
+      POSTGRES_USER: codfraud
+      POSTGRES_PASSWORD: codfraud_secret
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../backend/src/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codfraud -d codfraud_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: codfraud-redis
+    restart: unless-stopped
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
