@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { ordersApi } from '@/lib/api';
 import DashboardLayout from '@/components/layout/dashboard-layout';
+import { Modal } from '@/components/ui/modal';
 import clsx from 'clsx';
 
 interface Order {
@@ -41,6 +42,13 @@ function OrdersContent() {
   });
   const [loading, setLoading] = useState(true);
 
+  // Override modal state
+  const [overrideModal, setOverrideModal] = useState<{ orderId: string; rec: string; orderName: string } | null>(null);
+  const [overrideLoading, setOverrideLoading] = useState(false);
+
+  // Reason detail modal
+  const [reasonModal, setReasonModal] = useState<{ text: string; title: string } | null>(null);
+
   const fetchOrders = async (page = 1) => {
     setLoading(true);
     try {
@@ -61,13 +69,17 @@ function OrdersContent() {
 
   useEffect(() => { fetchOrders(); }, [filters]);
 
-  const handleOverride = async (orderId: string, rec: string) => {
-    if (!confirm(`Override to ${rec}?`)) return;
+  const handleOverride = async () => {
+    if (!overrideModal) return;
+    setOverrideLoading(true);
     try {
-      await ordersApi.override(orderId, rec);
+      await ordersApi.override(overrideModal.orderId, overrideModal.rec);
+      setOverrideModal(null);
       fetchOrders(pagination.page);
     } catch (err) {
       console.error(err);
+    } finally {
+      setOverrideLoading(false);
     }
   };
 
@@ -170,20 +182,39 @@ function OrdersContent() {
                         {order.recommendation || 'PENDING'}
                       </span>
                       {order.risk_summary && (
-                        <div className="text-xs text-gray-500 dark:text-slate-500 mt-1 max-w-[200px] truncate" title={order.risk_summary}>
-                          {order.risk_summary}
+                        <div className="flex items-center gap-1 mt-1">
+                          <span className="text-xs text-gray-500 dark:text-slate-500 max-w-[160px] truncate">
+                            {order.risk_summary}
+                          </span>
+                          {order.risk_summary.length > 30 && (
+                            <button
+                              onClick={() => setReasonModal({ text: order.risk_summary, title: `Risk Summary - ${order.external_order_id}` })}
+                              className="text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 transition-colors flex-shrink-0"
+                              title="View full details"
+                            >
+                              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                              </svg>
+                            </button>
+                          )}
                         </div>
                       )}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex gap-1">
                         {order.recommendation !== 'APPROVE' && (
-                          <button onClick={() => handleOverride(order.id, 'APPROVE')} className="rounded px-2 py-1 text-xs text-green-700 hover:bg-green-50 dark:text-green-400 dark:hover:bg-green-900/20">
+                          <button
+                            onClick={() => setOverrideModal({ orderId: order.id, rec: 'APPROVE', orderName: order.external_order_id })}
+                            className="rounded px-2 py-1 text-xs text-green-700 hover:bg-green-50 dark:text-green-400 dark:hover:bg-green-900/20"
+                          >
                             Approve
                           </button>
                         )}
                         {order.recommendation !== 'BLOCK' && (
-                          <button onClick={() => handleOverride(order.id, 'BLOCK')} className="rounded px-2 py-1 text-xs text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20">
+                          <button
+                            onClick={() => setOverrideModal({ orderId: order.id, rec: 'BLOCK', orderName: order.external_order_id })}
+                            className="rounded px-2 py-1 text-xs text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+                          >
                             Block
                           </button>
                         )}
@@ -223,6 +254,76 @@ function OrdersContent() {
           </div>
         )}
       </div>
+
+      {/* Override Confirmation Modal */}
+      <Modal
+        open={!!overrideModal}
+        onClose={() => setOverrideModal(null)}
+        title="Confirm Override"
+        size="sm"
+        variant={overrideModal?.rec === 'BLOCK' ? 'danger' : 'default'}
+      >
+        <div className="space-y-4">
+          <div className="flex items-center gap-3">
+            <div className={clsx(
+              'flex h-12 w-12 items-center justify-center rounded-full flex-shrink-0',
+              overrideModal?.rec === 'BLOCK'
+                ? 'bg-red-100 dark:bg-red-900/30'
+                : 'bg-green-100 dark:bg-green-900/30'
+            )}>
+              {overrideModal?.rec === 'BLOCK' ? (
+                <svg className="h-6 w-6 text-red-600 dark:text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                </svg>
+              ) : (
+                <svg className="h-6 w-6 text-green-600 dark:text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              )}
+            </div>
+            <div>
+              <p className="text-sm text-gray-700 dark:text-slate-300">
+                Are you sure you want to <strong className={overrideModal?.rec === 'BLOCK' ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}>{overrideModal?.rec?.toLowerCase()}</strong> order{' '}
+                <strong className="text-gray-900 dark:text-slate-100">{overrideModal?.orderName}</strong>?
+              </p>
+              <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">This action will override the ML recommendation.</p>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-2 border-t border-gray-100 dark:border-slate-700">
+            <button
+              onClick={() => setOverrideModal(null)}
+              className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-slate-300 bg-gray-100 dark:bg-slate-700 rounded-lg hover:bg-gray-200 dark:hover:bg-slate-600 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleOverride}
+              disabled={overrideLoading}
+              className={clsx(
+                'px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors disabled:opacity-50',
+                overrideModal?.rec === 'BLOCK'
+                  ? 'bg-red-600 hover:bg-red-700'
+                  : 'bg-green-600 hover:bg-green-700'
+              )}
+            >
+              {overrideLoading ? 'Processing...' : `Yes, ${overrideModal?.rec?.toLowerCase()}`}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Reason Detail Modal */}
+      <Modal
+        open={!!reasonModal}
+        onClose={() => setReasonModal(null)}
+        title={reasonModal?.title || 'Details'}
+        size="md"
+      >
+        <p className="text-sm text-gray-700 dark:text-slate-300 whitespace-pre-wrap leading-relaxed">
+          {reasonModal?.text}
+        </p>
+      </Modal>
     </DashboardLayout>
   );
 }

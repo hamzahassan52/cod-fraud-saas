@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { blacklistApi } from '@/lib/api';
 import DashboardLayout from '@/components/layout/dashboard-layout';
 import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import { Modal } from '@/components/ui/modal';
 import clsx from 'clsx';
 
 interface BlacklistEntry {
@@ -53,6 +53,9 @@ export default function BlacklistPage() {
   // Delete confirmation
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+
+  // Reason modal
+  const [reasonModal, setReasonModal] = useState<{ text: string; value: string } | null>(null);
 
   const fetchEntries = async () => {
     setLoading(true);
@@ -116,7 +119,7 @@ export default function BlacklistPage() {
 
   return (
     <DashboardLayout>
-      <div className="max-w-7xl mx-auto p-6 space-y-6">
+      <div className="p-6 space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
@@ -292,8 +295,25 @@ export default function BlacklistPage() {
                       <TypeBadge type={entry.type} />
                     </td>
                     <td className="px-4 py-3 font-mono text-sm text-gray-900 dark:text-slate-100">{entry.value}</td>
-                    <td className="px-4 py-3 text-gray-600 dark:text-slate-400 text-xs max-w-xs truncate">
-                      {entry.reason || '-'}
+                    <td className="px-4 py-3 text-gray-600 dark:text-slate-400 text-xs">
+                      {!entry.reason || entry.reason === '-' ? (
+                        <span className="text-gray-400 dark:text-slate-500">-</span>
+                      ) : entry.reason.length <= 40 ? (
+                        entry.reason
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <span className="max-w-[200px] truncate">{entry.reason}</span>
+                          <button
+                            onClick={() => setReasonModal({ text: entry.reason, value: entry.value })}
+                            className="text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 transition-colors flex-shrink-0"
+                            title="View full reason"
+                          >
+                            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                          </button>
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-xs text-gray-500 dark:text-slate-400">
                       {entry.expires_at
@@ -339,7 +359,17 @@ export default function BlacklistPage() {
         </div>
       </div>
 
-      {/* Delete confirmation backdrop is handled inline in the table */}
+      {/* Reason Detail Modal */}
+      <Modal
+        open={!!reasonModal}
+        onClose={() => setReasonModal(null)}
+        title={`Blacklist Reason - ${reasonModal?.value || ''}`}
+        size="md"
+      >
+        <p className="text-sm text-gray-700 dark:text-slate-300 whitespace-pre-wrap leading-relaxed">
+          {reasonModal?.text}
+        </p>
+      </Modal>
     </DashboardLayout>
   );
 }
