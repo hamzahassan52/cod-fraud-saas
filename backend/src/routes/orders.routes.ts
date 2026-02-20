@@ -29,9 +29,8 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
       const result = await query(
         `SELECT o.id, o.external_order_id, o.platform, o.customer_name,
                 o.customer_phone, o.shipping_city, o.total_amount,
-                fs.risk_score, fs.risk_level, fs.recommendation
+                o.risk_score, o.risk_level, o.recommendation
          FROM orders o
-         LEFT JOIN fraud_scores fs ON fs.order_id = o.id
          WHERE o.tenant_id = $1 AND o.platform = $2 AND o.external_order_id = $3
          LIMIT 1`,
         [tenantId, platform, externalOrderId]
