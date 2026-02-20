@@ -413,3 +413,21 @@ CREATE INDEX idx_performance_snapshots_tenant ON performance_snapshots(tenant_id
 CREATE INDEX idx_performance_snapshots_period ON performance_snapshots(period_start DESC);
 CREATE TRIGGER update_phones_updated_at BEFORE UPDATE ON phones FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_addresses_updated_at BEFORE UPDATE ON addresses FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- ============================================
+-- SHOPIFY CONNECTIONS
+-- ============================================
+CREATE TABLE IF NOT EXISTS shopify_connections (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    shop VARCHAR(255) NOT NULL,
+    access_token TEXT NOT NULL,
+    scopes TEXT,
+    webhook_id VARCHAR(255),
+    installed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(tenant_id),
+    UNIQUE(shop)
+);
+
+CREATE INDEX idx_shopify_connections_tenant ON shopify_connections(tenant_id);
+CREATE INDEX idx_shopify_connections_shop ON shopify_connections(shop);

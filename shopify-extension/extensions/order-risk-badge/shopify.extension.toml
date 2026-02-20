@@ -1,0 +1,21 @@
+api_version = "2024-01"
+
+[[extensions]]
+name = "COD Fraud Shield — Order Risk"
+handle = "order-risk-badge"
+type = "ui_extension"
+
+[[extensions.targeting]]
+module = "./src/OrderRiskBadge"
+target = "admin.order-details.block.render"
+
+[extensions.settings]
+[[extensions.settings.fields]]
+key = "api_key"
+type = "single_line_text_field"
+name = "COD Fraud Shield API Key"
+
+[[extensions.settings.fields]]
+key = "api_base_url"
+type = "single_line_text_field"
+name = "API Base URL"

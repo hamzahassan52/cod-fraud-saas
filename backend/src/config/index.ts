@@ -35,4 +35,9 @@ export const config = {
   encryption: {
     apiKeySecret: process.env.API_KEY_ENCRYPTION_SECRET || 'dev-encryption-key-32-bytes-long!',
   },
+  shopify: {
+    clientId: process.env.SHOPIFY_CLIENT_ID || '',
+    clientSecret: process.env.SHOPIFY_CLIENT_SECRET || '',
+    scopes: process.env.SHOPIFY_SCOPES || 'read_orders',
+  },
 } as const;

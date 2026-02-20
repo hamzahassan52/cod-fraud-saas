@@ -1,10 +1,11 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
-import { mlApi } from '@/lib/api';
+import { mlApi, shopifyApi } from '@/lib/api';
 import DashboardLayout from '@/components/layout/dashboard-layout';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Modal } from '@/components/ui/modal';
 import clsx from 'clsx';
 import api from '@/lib/api';
 
@@ -53,11 +54,20 @@ export default function SettingsPage() {
   const [generatingKey, setGeneratingKey] = useState(false);
   const [copiedKey, setCopiedKey] = useState(false);
 
+  // Integrations
+  const [shopifyConnected, setShopifyConnected] = useState(false);
+  const [shopifyShop, setShopifyShop] = useState('');
+  const [shopifyModalOpen, setShopifyModalOpen] = useState(false);
+  const [shopifyStoreInput, setShopifyStoreInput] = useState('');
+  const [copiedWebhookUrl, setCopiedWebhookUrl] = useState<string | null>(null);
+  const [expandedPlatform, setExpandedPlatform] = useState<string | null>(null);
+
   useEffect(() => {
     fetchProfile();
     fetchPlan();
     fetchApiKeys();
     fetchThresholds();
+    fetchShopifyStatus();
   }, []);
 
   const fetchProfile = async () => {
@@ -175,6 +185,52 @@ export default function SettingsPage() {
       setCopiedKey(true);
       setTimeout(() => setCopiedKey(false), 2000);
     }
+  };
+
+  const fetchShopifyStatus = async () => {
+    try {
+      const res = await shopifyApi.status();
+      setShopifyConnected(res.data.connected || false);
+      setShopifyShop(res.data.shop || '');
+    } catch {
+      setShopifyConnected(false);
+    }
+  };
+
+  const connectShopify = () => {
+    if (!shopifyStoreInput.trim()) return;
+    let shop = shopifyStoreInput.trim().toLowerCase();
+    if (!shop.includes('.myshopify.com')) shop = `${shop}.myshopify.com`;
+    const tenantId = profile?.tenant_id || '';
+    const backendUrl = process.env.NEXT_PUBLIC_API_URL?.replace('/api/v1', '') || '';
+    window.location.href = `${backendUrl}/api/v1/shopify/install?shop=${shop}&tenant_id=${tenantId}`;
+  };
+
+  const disconnectShopify = async () => {
+    try {
+      await shopifyApi.disconnect();
+      setShopifyConnected(false);
+      setShopifyShop('');
+    } catch (err: any) {
+      alert(err.response?.data?.message || 'Failed to disconnect');
+    }
+  };
+
+  const copyWebhookUrl = async (platform: string) => {
+    const backendUrl = process.env.NEXT_PUBLIC_API_URL?.replace('/api/v1', '') || 'https://cod-fraud-saas-production.up.railway.app';
+    const url = `${backendUrl}/api/v1/webhook/${platform}`;
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      const t = document.createElement('textarea');
+      t.value = url;
+      document.body.appendChild(t);
+      t.select();
+      document.execCommand('copy');
+      document.body.removeChild(t);
+    }
+    setCopiedWebhookUrl(platform);
+    setTimeout(() => setCopiedWebhookUrl(null), 2000);
   };
 
   const usagePercent = plan ? Math.min((plan.usage / plan.limit) * 100, 100) : 0;
@@ -469,7 +525,242 @@ export default function SettingsPage() {
             </div>
           )}
         </Card>
+        {/* Integrations */}
+        <Card title="Platform Integrations" subtitle="Connect your e-commerce platforms to start receiving orders">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+
+            {/* Shopify */}
+            <div className="rounded-xl border border-gray-200 dark:border-slate-700 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-green-50 dark:bg-green-900/20 text-xl">
+                    🛍
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">Shopify</p>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span className={clsx('h-1.5 w-1.5 rounded-full', shopifyConnected ? 'bg-green-500' : 'bg-gray-400')} />
+                      <span className="text-xs text-gray-500 dark:text-slate-400">
+                        {shopifyConnected ? shopifyShop : 'Not Connected'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                {shopifyConnected ? (
+                  <button
+                    onClick={disconnectShopify}
+                    className="text-xs text-red-600 dark:text-red-400 hover:underline"
+                  >
+                    Disconnect
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => setShopifyModalOpen(true)}
+                    className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-700 transition-colors"
+                  >
+                    Connect
+                  </button>
+                )}
+              </div>
+              {shopifyConnected && (
+                <p className="mt-3 text-xs text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/20 rounded-lg px-3 py-2">
+                  ✅ Orders from {shopifyShop} are being automatically scored
+                </p>
+              )}
+            </div>
+
+            {/* WooCommerce */}
+            <WebhookPlatformCard
+              platform="woocommerce"
+              name="WooCommerce"
+              emoji="🔌"
+              copied={copiedWebhookUrl === 'woocommerce'}
+              expanded={expandedPlatform === 'woocommerce'}
+              onCopy={() => copyWebhookUrl('woocommerce')}
+              onToggle={() => setExpandedPlatform(expandedPlatform === 'woocommerce' ? null : 'woocommerce')}
+              instructions={[
+                'Go to WooCommerce → Settings → Advanced → Webhooks',
+                'Click "Add webhook"',
+                'Set Topic to "Order created"',
+                'Paste the webhook URL above in the Delivery URL field',
+                'Add your API key in the Secret field',
+                'Save and test with a new order',
+              ]}
+            />
+
+            {/* Magento */}
+            <WebhookPlatformCard
+              platform="magento"
+              name="Magento"
+              emoji="🧲"
+              copied={copiedWebhookUrl === 'magento'}
+              expanded={expandedPlatform === 'magento'}
+              onCopy={() => copyWebhookUrl('magento')}
+              onToggle={() => setExpandedPlatform(expandedPlatform === 'magento' ? null : 'magento')}
+              instructions={[
+                'Install the COD Fraud Shield Magento module',
+                'Go to Stores → Configuration → COD Fraud Shield',
+                'Paste the webhook URL in the Endpoint field',
+                'Enter your API key',
+                'Save and flush cache',
+              ]}
+            />
+
+            {/* Joomla */}
+            <WebhookPlatformCard
+              platform="joomla"
+              name="Joomla / VirtueMart"
+              emoji="🟣"
+              copied={copiedWebhookUrl === 'joomla'}
+              expanded={expandedPlatform === 'joomla'}
+              onCopy={() => copyWebhookUrl('joomla')}
+              onToggle={() => setExpandedPlatform(expandedPlatform === 'joomla' ? null : 'joomla')}
+              instructions={[
+                'Install the COD Fraud Shield plugin from Extensions → Manage',
+                'Go to Components → VirtueMart → Configuration',
+                'Paste the webhook URL in the Fraud Check URL field',
+                'Enter your API key',
+                'Save configuration',
+              ]}
+            />
+
+            {/* Custom API */}
+            <WebhookPlatformCard
+              platform="api"
+              name="Custom / REST API"
+              emoji="⚡"
+              copied={copiedWebhookUrl === 'api'}
+              expanded={expandedPlatform === 'api'}
+              onCopy={() => copyWebhookUrl('api')}
+              onToggle={() => setExpandedPlatform(expandedPlatform === 'api' ? null : 'api')}
+              instructions={[
+                'Send a POST request to the webhook URL',
+                'Include X-API-Key header with your API key',
+                'Request body: { "order_id", "customer_name", "customer_phone", "total_amount", "city" }',
+                'Response includes: risk_score, risk_level, recommendation',
+              ]}
+            />
+          </div>
+        </Card>
+
+        {/* Shopify Connect Modal */}
+        <Modal
+          open={shopifyModalOpen}
+          onClose={() => { setShopifyModalOpen(false); setShopifyStoreInput(''); }}
+          title="Connect Shopify Store"
+          size="sm"
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600 dark:text-slate-400">
+              Enter your Shopify store URL to begin the OAuth connection flow.
+            </p>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Store URL</label>
+              <input
+                type="text"
+                placeholder="mystore.myshopify.com"
+                value={shopifyStoreInput}
+                onChange={(e) => setShopifyStoreInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && connectShopify()}
+                className="w-full rounded-lg border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <p className="mt-1 text-xs text-gray-400 dark:text-slate-500">e.g. mystore or mystore.myshopify.com</p>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => { setShopifyModalOpen(false); setShopifyStoreInput(''); }}
+                className="rounded-lg border border-gray-200 dark:border-slate-600 px-4 py-2 text-sm text-gray-600 dark:text-slate-400 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={connectShopify}
+                disabled={!shopifyStoreInput.trim()}
+                className="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 transition-colors disabled:opacity-50"
+              >
+                Connect →
+              </button>
+            </div>
+          </div>
+        </Modal>
       </div>
     </DashboardLayout>
+  );
+}
+
+interface WebhookPlatformCardProps {
+  platform: string;
+  name: string;
+  emoji: string;
+  copied: boolean;
+  expanded: boolean;
+  onCopy: () => void;
+  onToggle: () => void;
+  instructions: string[];
+}
+
+function WebhookPlatformCard({ platform, name, emoji, copied, expanded, onCopy, onToggle, instructions }: WebhookPlatformCardProps) {
+  const backendUrl = typeof window !== 'undefined'
+    ? (process.env.NEXT_PUBLIC_API_URL?.replace('/api/v1', '') || 'https://cod-fraud-saas-production.up.railway.app')
+    : 'https://cod-fraud-saas-production.up.railway.app';
+  const webhookUrl = `${backendUrl}/api/v1/webhook/${platform}`;
+
+  return (
+    <div className="rounded-xl border border-gray-200 dark:border-slate-700 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-gray-50 dark:bg-slate-700/50 text-xl">
+            {emoji}
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">{name}</p>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className="h-1.5 w-1.5 rounded-full bg-gray-400" />
+              <span className="text-xs text-gray-500 dark:text-slate-400">Not Connected</span>
+            </div>
+          </div>
+        </div>
+        <button
+          onClick={onToggle}
+          className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex-shrink-0"
+        >
+          {expanded ? 'Hide' : 'Setup'}
+        </button>
+      </div>
+
+      <div className="mt-3">
+        <p className="text-xs text-gray-500 dark:text-slate-400 mb-1">Webhook URL</p>
+        <div className="flex items-center gap-2">
+          <code className="flex-1 truncate rounded-lg bg-gray-50 dark:bg-slate-700 border border-gray-200 dark:border-slate-600 px-2 py-1.5 text-xs font-mono text-gray-700 dark:text-slate-300">
+            {webhookUrl}
+          </code>
+          <button
+            onClick={onCopy}
+            className={clsx(
+              'flex-shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors',
+              copied
+                ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
+                : 'bg-gray-100 dark:bg-slate-600 text-gray-700 dark:text-slate-300 hover:bg-gray-200 dark:hover:bg-slate-500'
+            )}
+          >
+            {copied ? 'Copied!' : 'Copy'}
+          </button>
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="mt-3 rounded-lg bg-gray-50 dark:bg-slate-700/50 p-3">
+          <p className="text-xs font-medium text-gray-700 dark:text-slate-300 mb-2">Setup Instructions</p>
+          <ol className="space-y-1.5">
+            {instructions.map((step, i) => (
+              <li key={i} className="flex gap-2 text-xs text-gray-600 dark:text-slate-400">
+                <span className="flex-shrink-0 font-semibold text-gray-400 dark:text-slate-500">{i + 1}.</span>
+                <span>{step}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+    </div>
   );
 }

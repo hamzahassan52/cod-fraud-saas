@@ -85,4 +85,10 @@ export const analyticsApi = {
     api.get('/analytics/override-stats', { params: { days } }),
 };
 
+// Shopify
+export const shopifyApi = {
+  status: () => api.get('/shopify/status'),
+  disconnect: () => api.delete('/shopify/disconnect'),
+};
+
 export default api;

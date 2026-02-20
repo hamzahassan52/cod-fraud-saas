@@ -89,6 +89,20 @@ async function migrate() {
           )
         `);
 
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS shopify_connections (
+            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+            tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+            shop VARCHAR(255) NOT NULL,
+            access_token TEXT NOT NULL,
+            scopes TEXT,
+            webhook_id VARCHAR(255),
+            installed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            UNIQUE(tenant_id),
+            UNIQUE(shop)
+          )
+        `);
+
         console.log('Migration complete (incremental).');
       } else {
         // Fresh database — run full schema

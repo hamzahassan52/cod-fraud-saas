@@ -12,6 +12,7 @@ import { blacklistRoutes } from './routes/blacklist.routes';
 import { analyticsRoutes } from './routes/analytics.routes';
 import { healthRoutes } from './routes/health.routes';
 import { mlRoutes } from './routes/ml.routes';
+import { shopifyRoutes } from './routes/shopify.routes';
 
 // Middleware
 import { requestIdPlugin } from './middlewares/request-id';
@@ -88,6 +89,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(blacklistRoutes, { prefix: '/api/v1/blacklist' });
   await app.register(analyticsRoutes, { prefix: '/api/v1/analytics' });
   await app.register(mlRoutes, { prefix: '/api/v1/ml' });
+  await app.register(shopifyRoutes, { prefix: '/api/v1/shopify' });
 
   // ---- Global Error Handler ----
   app.setErrorHandler((error, request, reply) => {

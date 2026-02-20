@@ -1,5 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { authenticate, checkUsageLimit } from '../middlewares/auth';
+import { authenticate, checkUsageLimit, apiKeyAuth } from '../middlewares/auth';
 import { query } from '../db/connection';
 import { z } from 'zod';
 import { cacheGetOrSet } from '../services/cache/redis';
@@ -18,7 +18,44 @@ const querySchema = z.object({
 });
 
 export async function orderRoutes(app: FastifyInstance): Promise<void> {
-  // All routes require auth
+  // External order lookup — API key auth only (for Shopify Extension)
+  app.get<{ Params: { platform: string; externalOrderId: string } }>(
+    '/external/:platform/:externalOrderId',
+    { onRequest: [apiKeyAuth] },
+    async (request, reply) => {
+      const { platform, externalOrderId } = request.params;
+      const tenantId = request.tenantId!;
+
+      const result = await query(
+        `SELECT o.id, o.external_order_id, o.platform, o.customer_name,
+                o.customer_phone, o.shipping_city, o.total_amount,
+                fs.risk_score, fs.risk_level, fs.recommendation
+         FROM orders o
+         LEFT JOIN fraud_scores fs ON fs.order_id = o.id
+         WHERE o.tenant_id = $1 AND o.platform = $2 AND o.external_order_id = $3
+         LIMIT 1`,
+        [tenantId, platform, externalOrderId]
+      );
+
+      if (result.rows.length === 0) {
+        return reply.code(404).send({ found: false });
+      }
+
+      const row = result.rows[0];
+      return reply.send({
+        found: true,
+        order_id: row.id,
+        external_order_id: row.external_order_id,
+        risk_score: row.risk_score,
+        risk_level: row.risk_level,
+        recommendation: row.recommendation,
+        customer_name: row.customer_name,
+        dashboard_url: `https://cod-fraud-saas.vercel.app/orders/${row.id}`,
+      });
+    }
+  );
+
+  // All other routes require JWT or API key auth
   app.addHook('onRequest', authenticate);
 
   // GET /orders - List orders with filtering
