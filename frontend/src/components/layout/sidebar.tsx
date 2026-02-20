@@ -9,6 +9,8 @@ import { useAuth } from '@/hooks/use-auth';
 interface SidebarProps {
   open: boolean;
   onClose: () => void;
+  collapsed: boolean;
+  onCollapsedChange: (v: boolean) => void;
 }
 
 interface NavItem {
@@ -91,14 +93,21 @@ const planColors: Record<string, string> = {
   enterprise: 'bg-amber-600 text-amber-100',
 };
 
-export function Sidebar({ open, onClose }: SidebarProps) {
+export function Sidebar({ open, onClose, collapsed, onCollapsedChange }: SidebarProps) {
   const pathname = usePathname();
   const { user, tenant, logout } = useAuth();
-  const [collapsed, setCollapsed] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
+
+  const showFull = !collapsed || isHovered;
 
   const isActive = (href: string) => {
     if (href === '/') return pathname === '/';
     return pathname.startsWith(href);
+  };
+
+  const handleToggle = () => {
+    onCollapsedChange(!collapsed);
+    setIsHovered(false);
   };
 
   return (
@@ -109,19 +118,26 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       )}
 
       <aside
+        onMouseEnter={() => { if (collapsed) setIsHovered(true); }}
+        onMouseLeave={() => setIsHovered(false)}
         className={clsx(
           'fixed inset-y-0 left-0 z-50 flex flex-col bg-gray-900 transition-all duration-200 ease-in-out lg:translate-x-0',
           open ? 'translate-x-0' : '-translate-x-full',
-          collapsed ? 'w-[68px]' : 'w-64'
+          'w-64',
+          !showFull && 'lg:w-[68px]',
+          collapsed && isHovered && 'shadow-2xl shadow-black/40'
         )}
       >
         {/* Header */}
-        <div className={clsx('flex h-16 items-center border-b border-gray-800', collapsed ? 'justify-center px-2' : 'gap-3 px-5')}>
+        <div className={clsx(
+          'flex h-16 items-center border-b border-gray-800 flex-shrink-0',
+          showFull ? 'gap-3 px-5' : 'justify-center px-2'
+        )}>
           <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-blue-600 text-sm font-bold text-white">
             {tenant?.companyName?.charAt(0)?.toUpperCase() || 'C'}
           </div>
-          {!collapsed && (
-            <div className="min-w-0 flex-1">
+          {showFull && (
+            <div className="min-w-0 flex-1 overflow-hidden">
               <p className="truncate text-sm font-semibold text-white">
                 {tenant?.companyName || 'COD Fraud Shield'}
               </p>
@@ -132,64 +148,99 @@ export function Sidebar({ open, onClose }: SidebarProps) {
               )}
             </div>
           )}
-          {/* Mobile close */}
-          <button onClick={onClose} className="rounded-md p-1 text-gray-400 hover:text-white lg:hidden">
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          {showFull && (
+            <button onClick={onClose} className="rounded-md p-1 text-gray-400 hover:text-white lg:hidden flex-shrink-0">
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 overflow-y-auto px-2 py-4">
-          <ul className="space-y-1">
+        <nav className="flex-1 overflow-y-auto overflow-x-hidden px-2 py-4">
+          <ul className="space-y-0.5">
             {navItems.map((item) => (
               <li key={item.href}>
                 <Link
                   href={item.href}
                   onClick={onClose}
-                  title={collapsed ? item.label : undefined}
+                  title={!showFull ? item.label : undefined}
                   className={clsx(
-                    'group flex items-center rounded-lg text-sm font-medium transition-colors',
-                    collapsed ? 'justify-center px-2 py-2.5' : 'gap-3 px-3 py-2.5',
+                    'group flex items-center rounded-lg text-sm font-medium transition-all duration-150',
+                    showFull ? 'gap-3 px-3 py-2.5' : 'justify-center px-0 py-2.5',
                     isActive(item.href)
                       ? 'bg-gray-800 text-white'
-                      : 'text-gray-400 hover:bg-gray-800/50 hover:text-white'
+                      : 'text-gray-400 hover:bg-gray-800/60 hover:text-white'
                   )}
                 >
-                  <span className={clsx('flex-shrink-0 transition-colors', isActive(item.href) ? 'text-blue-400' : 'text-gray-500 group-hover:text-gray-300')}>
+                  <span className={clsx(
+                    'flex h-5 w-5 flex-shrink-0 items-center justify-center transition-colors',
+                    isActive(item.href) ? 'text-blue-400' : 'text-gray-500 group-hover:text-gray-300'
+                  )}>
                     {item.icon}
                   </span>
-                  {!collapsed && item.label}
+                  {showFull && (
+                    <span className="truncate">{item.label}</span>
+                  )}
+                  {showFull && isActive(item.href) && (
+                    <span className="ml-auto h-1.5 w-1.5 flex-shrink-0 rounded-full bg-blue-400" />
+                  )}
                 </Link>
               </li>
             ))}
           </ul>
         </nav>
 
-        {/* Collapse toggle - desktop only */}
+        {/* Collapse toggle — desktop only */}
         <button
-          onClick={() => setCollapsed(!collapsed)}
-          className="hidden lg:flex items-center justify-center border-t border-gray-800 py-3 text-gray-500 hover:text-white transition-colors"
+          onClick={handleToggle}
+          className={clsx(
+            'hidden lg:flex items-center border-t border-gray-800 transition-colors hover:bg-gray-800/50 group flex-shrink-0',
+            showFull ? 'gap-3 px-4 py-3' : 'justify-center py-3'
+          )}
         >
-          <svg className={clsx('h-4 w-4 transition-transform', collapsed && 'rotate-180')} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M18.75 19.5l-7.5-7.5 7.5-7.5m-6 15L5.25 12l7.5-7.5" />
-          </svg>
+          <div className={clsx(
+            'flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border transition-colors',
+            'border-gray-700 bg-gray-800/80 group-hover:border-gray-500 group-hover:bg-gray-700'
+          )}>
+            <svg
+              className={clsx(
+                'h-3 w-3 text-gray-400 transition-transform duration-200 group-hover:text-gray-200',
+                showFull ? '' : 'rotate-180'
+              )}
+              fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+            </svg>
+          </div>
+          {showFull && (
+            <span className="text-xs font-medium text-gray-500 group-hover:text-gray-400 truncate">
+              Collapse sidebar
+            </span>
+          )}
         </button>
 
         {/* User footer */}
-        <div className={clsx('border-t border-gray-800 px-3 py-4', collapsed && 'px-2')}>
-          <div className={clsx('flex items-center', collapsed ? 'justify-center' : 'gap-3')}>
-            <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-gray-700 text-xs font-medium text-white">
+        <div className={clsx(
+          'border-t border-gray-800 flex-shrink-0',
+          showFull ? 'px-3 py-3' : 'px-2 py-3'
+        )}>
+          <div className={clsx('flex items-center', showFull ? 'gap-3' : 'justify-center')}>
+            <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-700 text-xs font-semibold text-white">
               {user?.name?.charAt(0)?.toUpperCase() || 'U'}
             </div>
-            {!collapsed && (
+            {showFull && (
               <>
-                <div className="min-w-0 flex-1">
+                <div className="min-w-0 flex-1 overflow-hidden">
                   <p className="truncate text-sm font-medium text-white">{user?.name || 'User'}</p>
                   <p className="truncate text-xs text-gray-500">{user?.email || ''}</p>
                 </div>
-                <button onClick={logout} title="Logout" className="flex-shrink-0 rounded-md p-1.5 text-gray-400 hover:bg-gray-800 hover:text-white">
+                <button
+                  onClick={logout}
+                  title="Logout"
+                  className="flex-shrink-0 rounded-md p-1.5 text-gray-400 hover:bg-gray-800 hover:text-white transition-colors"
+                >
                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
                   </svg>

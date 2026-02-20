@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sidebar } from './sidebar';
 import { Topbar } from './Topbar';
+import clsx from 'clsx';
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -12,6 +13,7 @@ interface DashboardLayoutProps {
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
 
   useEffect(() => {
@@ -34,8 +36,16 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-900">
-      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-      <div className="lg:pl-64">
+      <Sidebar
+        open={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        collapsed={collapsed}
+        onCollapsedChange={setCollapsed}
+      />
+      <div className={clsx(
+        'transition-[padding] duration-200 ease-in-out',
+        collapsed ? 'lg:pl-[68px]' : 'lg:pl-64'
+      )}>
         <Topbar onMenuClick={() => setSidebarOpen(true)} />
         <main className="p-4 sm:p-6">{children}</main>
       </div>
