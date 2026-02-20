@@ -161,9 +161,9 @@ export default function MLPage() {
     <DashboardLayout>
       <div className="p-6 space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-slate-100">ML Model Insights</h1>
+            <h1 className="text-xl font-bold text-gray-900 dark:text-slate-100 sm:text-2xl">ML Model Insights</h1>
             <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">
               Monitor model performance, feature importance, and service health
             </p>

@@ -183,6 +183,71 @@ export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ success: true, message: `Order marked as ${outcome}` });
   });
 
+  // GET /analytics/performance - AI model performance + advanced metrics
+  app.get('/performance', async (request, reply) => {
+    const tenantId = request.tenantId!;
+    const { days = '30' } = request.query as any;
+    const daysNum = parseInt(days);
+
+    const [mainResult, confidenceResult, velocityResult] = await Promise.all([
+      query(
+        `SELECT
+          COUNT(*) FILTER (WHERE recommendation = 'APPROVE' AND status = 'rto') as false_negatives,
+          COUNT(*) FILTER (WHERE recommendation = 'APPROVE' AND status IN ('rto','delivered')) as approved_with_outcome,
+          COUNT(*) FILTER (WHERE recommendation = 'BLOCK' AND status = 'delivered') as false_positives,
+          COUNT(*) FILTER (WHERE recommendation = 'BLOCK' AND status IN ('rto','delivered')) as blocked_with_outcome,
+          COUNT(*) FILTER (WHERE override_at IS NOT NULL) as overrides,
+          COUNT(*) as total,
+          COUNT(*) FILTER (WHERE previous_rto_count > 0) as repeat_offender_orders
+         FROM orders
+         WHERE tenant_id = $1 AND created_at >= NOW() - INTERVAL '1 day' * $2`,
+        [tenantId, daysNum]
+      ),
+      query(
+        `SELECT ROUND(AVG(fs.confidence)::numeric * 100, 1) as avg_confidence
+         FROM fraud_scores fs
+         JOIN orders o ON o.id = fs.order_id
+         WHERE o.tenant_id = $1 AND o.created_at >= NOW() - INTERVAL '1 day' * $2`,
+        [tenantId, daysNum]
+      ),
+      query(
+        `SELECT
+          COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '1 hour' AND recommendation = 'BLOCK') as last_hour_blocked,
+          COUNT(*) FILTER (WHERE recommendation = 'BLOCK') as period_blocked,
+          GREATEST(EXTRACT(EPOCH FROM (NOW() - MIN(created_at))) / 3600.0, 1) as hours_in_period
+         FROM orders
+         WHERE tenant_id = $1 AND created_at >= NOW() - INTERVAL '7 days'`,
+        [tenantId]
+      ),
+    ]);
+
+    const m = mainResult.rows[0];
+    const falseNegativeRate = parseInt(m.approved_with_outcome) > 0
+      ? Math.round(parseInt(m.false_negatives) / parseInt(m.approved_with_outcome) * 1000) / 10
+      : null;
+    const falsePositiveRate = parseInt(m.blocked_with_outcome) > 0
+      ? Math.round(parseInt(m.false_positives) / parseInt(m.blocked_with_outcome) * 1000) / 10
+      : null;
+    const overrideRate = parseInt(m.total) > 0
+      ? Math.round(parseInt(m.overrides) / parseInt(m.total) * 1000) / 10
+      : 0;
+
+    const v = velocityResult.rows[0];
+    const avgHourly = parseFloat(v.period_blocked) / parseFloat(v.hours_in_period);
+    const fraudVelocityIndex = avgHourly > 0
+      ? Math.round(parseInt(v.last_hour_blocked) / avgHourly * 10) / 10
+      : null;
+
+    return reply.send({
+      falseNegativeRate,
+      falsePositiveRate,
+      overrideRate,
+      repeatOffenderOrders: parseInt(m.repeat_offender_orders),
+      avgConfidence: parseFloat(confidenceResult.rows[0].avg_confidence) || null,
+      fraudVelocityIndex,
+    });
+  });
+
   // GET /analytics/override-stats - Override statistics
   app.get('/override-stats', async (request: FastifyRequest, reply: FastifyReply) => {
     const tenantId = request.tenantId!;

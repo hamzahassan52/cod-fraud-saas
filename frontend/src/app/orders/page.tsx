@@ -134,12 +134,13 @@ function OrdersContent() {
         </div>
 
         {/* Table */}
-        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
+        <div className="rounded-xl border border-gray-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
           {loading ? (
             <div className="flex items-center justify-center py-16">
               <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-blue-600" />
             </div>
           ) : (
+            <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="border-b border-gray-100 bg-gray-50 dark:border-slate-700 dark:bg-slate-800/50">
                 <tr>
@@ -224,6 +225,7 @@ function OrdersContent() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
 
           {orders.length === 0 && !loading && (

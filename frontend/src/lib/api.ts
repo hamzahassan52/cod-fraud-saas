@@ -83,6 +83,8 @@ export const analyticsApi = {
     api.post('/analytics/rto-feedback', data),
   overrideStats: (days?: number) =>
     api.get('/analytics/override-stats', { params: { days } }),
+  performance: (days?: number) =>
+    api.get('/analytics/performance', { params: { days } }),
 };
 
 // Shopify

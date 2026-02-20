@@ -1,70 +1,145 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { analyticsApi, mlApi } from '@/lib/api';
+import { analyticsApi, mlApi, ordersApi } from '@/lib/api';
 import DashboardLayout from '@/components/layout/dashboard-layout';
 import { Card } from '@/components/ui/card';
-import { StatCard } from '@/components/ui/stat-card';
+import { RiskDistributionChart } from '@/components/charts/RiskDistributionChart';
+import { RevenueSavedChart } from '@/components/charts/RevenueSavedChart';
+import { FraudTriggerChart } from '@/components/charts/FraudTriggerChart';
 import Link from 'next/link';
 import clsx from 'clsx';
 
-interface DashboardData {
-  summary: {
-    totalOrders: number;
-    approved: number;
-    blocked: number;
-    verify: number;
-    totalRto: number;
-    totalDelivered: number;
-    rtoRate: number;
-    avgRiskScore: number;
-    totalRevenue: number;
-  };
-  dailyOrders: any[];
-  topFraudSignals: any[];
-  riskDistribution: any[];
-  topRtoCities: any[];
-  platformBreakdown: any[];
+const COURIER_COST = 300;
+const SUBSCRIPTION_COST = 5000;
+
+function formatK(v: number): string {
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+  if (v >= 1_000) return `${Math.round(v / 1_000)}K`;
+  return Math.round(v).toString();
 }
 
-interface MLMetrics {
-  accuracy?: number;
-  f1_score?: number;
-  model_version?: string;
+function Sparkline({ data, color = '#10b981' }: { data: number[]; color?: string }) {
+  if (!data || data.length < 2) return null;
+  const W = 72, H = 28;
+  const max = Math.max(...data, 1), min = Math.min(...data, 0), range = max - min || 1;
+  const pts = data.map((v, i) =>
+    `${((i / (data.length - 1)) * W).toFixed(1)},${(H - ((v - min) / range) * (H - 4) - 2).toFixed(1)}`
+  );
+  return (
+    <svg width={W} height={H} className="opacity-80">
+      <path d={`M ${pts.join(' L ')}`} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
 }
 
-function calcDeltaPct(today: number, yesterday: number): number | undefined {
-  if (yesterday === 0) return undefined;
-  return Math.round(((today - yesterday) / yesterday) * 100);
+function FinancialCard({
+  label, value, subtitle, delta, lowerIsBetter = false, sparkData, highlight, badge,
+}: {
+  label: string; value: string; subtitle?: string; delta?: number | null;
+  lowerIsBetter?: boolean; sparkData?: number[]; highlight?: boolean; badge?: string;
+}) {
+  const isPositive = delta != null ? (lowerIsBetter ? delta < 0 : delta > 0) : null;
+  return (
+    <div className={clsx(
+      'rounded-xl border p-5 shadow-sm',
+      highlight
+        ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-900/20'
+        : 'border-gray-200 bg-white dark:border-slate-700 dark:bg-slate-800'
+    )}>
+      <div className="flex items-start justify-between">
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 dark:text-slate-500">{label}</p>
+          {badge && (
+            <span className="mt-0.5 inline-block rounded-full bg-indigo-100 dark:bg-indigo-900/30 px-2 py-0.5 text-[10px] font-medium text-indigo-700 dark:text-indigo-400">
+              {badge}
+            </span>
+          )}
+          <p className={clsx(
+            'mt-2 text-3xl font-bold tracking-tight',
+            highlight ? 'text-emerald-700 dark:text-emerald-400' : 'text-gray-900 dark:text-slate-100'
+          )}>
+            {value}
+          </p>
+          {delta != null && (
+            <div className="mt-1.5 flex items-center gap-1">
+              <span className={clsx(
+                'flex items-center gap-0.5 text-xs font-semibold',
+                isPositive ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'
+              )}>
+                {isPositive
+                  ? <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 10.5L12 3m0 0l7.5 7.5M12 3v18" /></svg>
+                  : <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 13.5L12 21m0 0l-7.5-7.5M12 21V3" /></svg>
+                }
+                {Math.abs(delta)}%
+              </span>
+              <span className="text-[10px] text-gray-400 dark:text-slate-500">vs prior period</span>
+            </div>
+          )}
+          {subtitle && <p className="mt-1 text-xs text-gray-400 dark:text-slate-500">{subtitle}</p>}
+        </div>
+        {sparkData && sparkData.length > 1 && (
+          <div className="ml-3 mt-1 flex-shrink-0">
+            <Sparkline data={sparkData} color={highlight ? '#10b981' : '#6366f1'} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AIMetricCard({ label, value, subtitle, status = 'neutral' }: {
+  label: string; value: string; subtitle?: string; status?: 'healthy' | 'warning' | 'neutral';
+}) {
+  return (
+    <div className="rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-4">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 dark:text-slate-500">{label}</p>
+        {status !== 'neutral' && (
+          <span className={clsx('h-2 w-2 rounded-full', status === 'healthy' ? 'bg-emerald-500' : 'bg-amber-500')} />
+        )}
+      </div>
+      <p className="text-2xl font-bold text-gray-900 dark:text-slate-100">{value}</p>
+      {subtitle && <p className="mt-0.5 text-[10px] text-gray-400 dark:text-slate-500 truncate">{subtitle}</p>}
+    </div>
+  );
 }
 
 export default function Dashboard() {
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [mlMetrics, setMlMetrics] = useState<MLMetrics | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<any>(null);
+  const [priorData, setPriorData] = useState<any>(null);
+  const [mlMetrics, setMlMetrics] = useState<any>(null);
+  const [urgentOrders, setUrgentOrders] = useState<any[]>([]);
+  const [perfData, setPerfData] = useState<any>(null);
   const [days, setDays] = useState(7);
+  const [loading, setLoading] = useState(true);
+  const [refreshTime, setRefreshTime] = useState('');
 
   useEffect(() => {
     setLoading(true);
     Promise.all([
       analyticsApi.dashboard(days),
+      analyticsApi.dashboard(days * 2).catch(() => ({ data: null })),
       mlApi.metrics().catch(() => ({ data: null })),
-    ])
-      .then(([analyticsRes, mlRes]) => {
-        setData(analyticsRes.data);
-        if (mlRes.data) setMlMetrics(mlRes.data);
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false));
+      ordersApi.list({ recommendation: 'VERIFY', limit: 5, sortBy: 'risk_score', sortOrder: 'desc' }).catch(() => ({ data: { orders: [] } })),
+      analyticsApi.performance().catch(() => ({ data: null })),
+    ]).then(([curr, prior, ml, urgent, perf]) => {
+      setData(curr.data);
+      setPriorData(prior.data);
+      setMlMetrics(ml.data);
+      setUrgentOrders(urgent.data?.orders || []);
+      setPerfData(perf.data);
+      setRefreshTime(new Date().toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' }));
+    }).catch(console.error).finally(() => setLoading(false));
   }, [days]);
 
   if (loading) {
     return (
       <DashboardLayout>
-        <div className="flex items-center justify-center h-96">
+        <div className="flex h-96 items-center justify-center">
           <div className="text-center">
-            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mx-auto" />
-            <p className="text-sm text-gray-500 dark:text-slate-400 mt-3">Loading dashboard...</p>
+            <div className="mx-auto h-10 w-10 animate-spin rounded-full border-b-2 border-blue-600" />
+            <p className="mt-3 text-sm text-gray-500 dark:text-slate-400">Loading dashboard...</p>
           </div>
         </div>
       </DashboardLayout>
@@ -74,66 +149,88 @@ export default function Dashboard() {
   if (!data) {
     return (
       <DashboardLayout>
-        <div className="flex flex-col items-center justify-center h-96 gap-4">
-          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 dark:bg-slate-800">
-            <svg className="h-8 w-8 text-gray-400 dark:text-slate-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
-            </svg>
-          </div>
-          <p className="text-gray-500 dark:text-slate-400 font-medium">Failed to load dashboard data</p>
-          <p className="text-sm text-gray-400 dark:text-slate-500">Check your connection and try again</p>
+        <div className="flex flex-col items-center justify-center h-96 gap-3">
+          <p className="text-gray-500 dark:text-slate-400 font-medium">Failed to load dashboard</p>
         </div>
       </DashboardLayout>
     );
   }
 
   const { summary } = data;
-  const needsReview = summary.verify || 0;
-
-  // Avg order value
   const avgOrderValue = summary.totalOrders > 0 ? summary.totalRevenue / summary.totalOrders : 0;
-  const revenueProtected = summary.blocked * avgOrderValue;
 
-  // Today vs yesterday deltas from dailyOrders (sorted DESC by date)
-  const today = data.dailyOrders[0];
-  const yesterday = data.dailyOrders[1];
-  const todayBlocked = parseInt(today?.blocked || 0);
-  const yesterdayBlocked = parseInt(yesterday?.blocked || 0);
-  const todayVerify = parseInt(today?.rto || 0) + parseInt(today?.total || 0) - parseInt(today?.delivered || 0) - parseInt(today?.blocked || 0);
-  const yesterdayVerify = parseInt(yesterday?.rto || 0) + parseInt(yesterday?.total || 0) - parseInt(yesterday?.delivered || 0) - parseInt(yesterday?.blocked || 0);
-  const todayRto = parseInt(today?.rto || 0);
-  const yesterdayRto = parseInt(yesterday?.rto || 0);
-  const todayTotal = parseInt(today?.total || 0);
-  const yesterdayTotal = parseInt(yesterday?.total || 0);
+  // Financial
+  const capitalProtected = summary.blocked * avgOrderValue;
+  const courierSaved = summary.blocked * COURIER_COST;
+  const estLossPrevented = capitalProtected + courierSaved;
+  const roiMultiple = SUBSCRIPTION_COST > 0 ? Math.round(estLossPrevented / SUBSCRIPTION_COST) : 0;
 
-  const blockedDelta = calcDeltaPct(todayBlocked, yesterdayBlocked);
-  const verifyDelta = calcDeltaPct(todayVerify, yesterdayVerify);
-  const rtoDelta = calcDeltaPct(todayRto, yesterdayRto);
-  const totalDelta = calcDeltaPct(todayTotal, yesterdayTotal);
+  // Prior period comparison
+  const priorBlocked = priorData ? priorData.summary.blocked - summary.blocked : null;
+  const priorCapital = priorBlocked != null ? priorBlocked * avgOrderValue : null;
+  const priorEstLoss = priorCapital != null ? priorCapital + priorBlocked! * COURIER_COST : null;
+  const capitalDelta = priorCapital && priorCapital > 0 ? Math.round((capitalProtected - priorCapital) / priorCapital * 100) : null;
+  const lossDelta = priorEstLoss && priorEstLoss > 0 ? Math.round((estLossPrevented - priorEstLoss) / priorEstLoss * 100) : null;
 
-  // Model health
+  const priorRtoN = priorData ? priorData.summary.totalRto - summary.totalRto : null;
+  const priorDelN = priorData ? priorData.summary.totalDelivered - summary.totalDelivered : null;
+  const priorRtoRate = priorRtoN != null && priorDelN != null && (priorRtoN + priorDelN) > 0
+    ? Math.round(priorRtoN / (priorRtoN + priorDelN) * 1000) / 10 : null;
+  const rtoDelta = priorRtoRate != null ? Math.round((summary.rtoRate - priorRtoRate) * 10) / 10 : null;
+
+  // Sparklines — sorted oldest to newest
+  const dailySorted = [...data.dailyOrders].reverse();
+  const revenueSparkData = dailySorted.map((d: any) => parseInt(d.blocked || 0) * avgOrderValue);
+  const blockedSparkData = dailySorted.map((d: any) => parseInt(d.blocked || 0));
+
+  // Charts
+  const riskChartData = (['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const).map((level) => {
+    const item = data.riskDistribution.find((r: any) => r.risk_level === level);
+    const colors = { LOW: '#22c55e', MEDIUM: '#f59e0b', HIGH: '#ef4444', CRITICAL: '#991b1b' };
+    return { name: level, value: item ? parseInt(item.count) : 0, color: colors[level] };
+  }).filter(d => d.value > 0);
+
+  const revenueTrend = dailySorted.slice(-Math.min(days, 14)).map((d: any) => ({
+    date: new Date(d.date).toLocaleDateString('en-PK', { month: 'short', day: 'numeric' }),
+    revenue_saved: parseInt(d.blocked || 0) * avgOrderValue,
+  }));
+
+  // ML
   const accuracy = mlMetrics?.accuracy ? Math.round(mlMetrics.accuracy * 100) : null;
-  const f1Score = mlMetrics?.f1_score ? Math.round(mlMetrics.f1_score * 100) : null;
-  const isHealthy = accuracy !== null ? accuracy >= 80 : null;
+  const f1 = mlMetrics?.f1_score ? Math.round(mlMetrics.f1_score * 100) : null;
+  const isModelHealthy = accuracy != null ? accuracy >= 80 : null;
 
-  // Estimated risk exposure for VERIFY orders
+  const modelVersion: string = mlMetrics?.model_version || '';
+  let modelAge: number | null = null;
+  const mv = modelVersion.match(/v(\d{8})/);
+  if (mv) {
+    const ds = mv[1];
+    modelAge = Math.floor((Date.now() - new Date(parseInt(ds.slice(0,4)), parseInt(ds.slice(4,6))-1, parseInt(ds.slice(6,8))).getTime()) / 86400000);
+  }
+
+  const needsReview = summary.verify || 0;
   const riskExposure = needsReview * avgOrderValue;
-  const avgRiskScore = summary.avgRiskScore || 0;
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
+      <div className="space-y-8">
+
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-slate-100">Fraud Control Panel</h1>
-            <p className="text-sm text-gray-500 dark:text-slate-400">Real-time operational overview</p>
+            <div className="flex items-center gap-2.5">
+              <h1 className="text-xl font-bold text-gray-900 dark:text-slate-100 sm:text-2xl">Revenue Protection Command Center</h1>
+              <span className="flex items-center gap-1.5 rounded-full bg-emerald-100 dark:bg-emerald-900/30 px-2.5 py-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                Live
+              </span>
+            </div>
+            <p className="mt-0.5 text-sm text-gray-500 dark:text-slate-400">
+              Your capital shield — active and protecting · Refreshed at {refreshTime}
+            </p>
           </div>
-          <div className="flex gap-1 rounded-lg bg-gray-100 p-1 dark:bg-slate-800">
-            {[
-              { label: 'Today', value: 1 },
-              { label: '7d', value: 7 },
-            ].map(({ label, value }) => (
+          <div className="flex gap-1 rounded-lg bg-gray-100 p-1 dark:bg-slate-800 self-start sm:self-auto">
+            {[{ label: 'Last 24h', value: 1 }, { label: 'Last 7 Days', value: 7 }].map(({ label, value }) => (
               <button
                 key={value}
                 onClick={() => setDays(value)}
@@ -141,7 +238,7 @@ export default function Dashboard() {
                   'rounded-md px-3 py-1.5 text-xs font-medium transition-colors',
                   days === value
                     ? 'bg-white text-gray-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
-                    : 'text-gray-500 hover:text-gray-700 dark:text-slate-400 dark:hover:text-slate-200'
+                    : 'text-gray-500 hover:text-gray-700 dark:text-slate-400'
                 )}
               >
                 {label}
@@ -150,178 +247,398 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Orders Requiring Review — Prominent Card */}
+        {/* Layer 1: Financial Impact */}
+        <section>
+          <p className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-gray-400 dark:text-slate-500">Financial Impact</p>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <FinancialCard
+              label="Capital Protected"
+              value={`PKR ${formatK(capitalProtected)}`}
+              subtitle={`${summary.blocked} orders blocked`}
+              delta={capitalDelta}
+              sparkData={revenueSparkData}
+              highlight
+            />
+            <FinancialCard
+              label="Estimated Loss Prevented"
+              value={`PKR ${formatK(estLossPrevented)}`}
+              subtitle={`Incl. PKR ${formatK(courierSaved)} courier saved`}
+              delta={lossDelta}
+              sparkData={revenueSparkData.map((v: number) => v * 1.16)}
+              badge="Product + Courier"
+            />
+            <FinancialCard
+              label="Net Revenue Saved"
+              value={`PKR ${formatK(estLossPrevented)}`}
+              subtitle="Total financial exposure averted"
+              delta={lossDelta}
+              sparkData={blockedSparkData}
+            />
+            <FinancialCard
+              label="Protection ROI"
+              value={`${roiMultiple}×`}
+              subtitle={`Every PKR 1 spent → PKR ${roiMultiple} protected`}
+              badge="vs subscription"
+            />
+          </div>
+        </section>
+
+        {/* Layer 2: Risk Overview */}
+        <section>
+          <p className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-gray-400 dark:text-slate-500">Risk Overview</p>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-xl border border-gray-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 dark:text-slate-500">Total Orders</p>
+              <p className="mt-2 text-3xl font-bold text-gray-900 dark:text-slate-100">{summary.totalOrders.toLocaleString()}</p>
+              {priorData && (
+                <p className="mt-1 text-xs text-gray-400 dark:text-slate-500">Prior period: {(priorData.summary.totalOrders - summary.totalOrders).toLocaleString()}</p>
+              )}
+            </div>
+
+            <div className="rounded-xl border border-red-100 bg-red-50 p-5 dark:border-red-900/40 dark:bg-red-900/10">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-red-500 dark:text-red-400">Blocked — Revenue Saved</p>
+              <p className="mt-2 text-3xl font-bold text-red-700 dark:text-red-300">{summary.blocked.toLocaleString()}</p>
+              <p className="mt-1 text-xs text-red-400 dark:text-red-500">
+                {summary.totalOrders > 0 ? Math.round(summary.blocked / summary.totalOrders * 100) : 0}% block rate
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-amber-100 bg-amber-50 p-5 dark:border-amber-900/40 dark:bg-amber-900/10">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-amber-600 dark:text-amber-400">Under Review</p>
+              <p className="mt-2 text-3xl font-bold text-amber-700 dark:text-amber-300">{summary.verify.toLocaleString()}</p>
+              <p className="mt-1 text-xs text-amber-500 dark:text-amber-400/70">Awaiting manual decision</p>
+            </div>
+
+            <div className={clsx(
+              'rounded-xl border p-5',
+              summary.rtoRate > 20
+                ? 'border-red-100 bg-red-50 dark:border-red-900/40 dark:bg-red-900/10'
+                : summary.rtoRate > 10
+                ? 'border-amber-100 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-900/10'
+                : 'border-emerald-100 bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-900/10'
+            )}>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 dark:text-slate-500">Return-to-Origin Rate</p>
+              <p className={clsx(
+                'mt-2 text-3xl font-bold',
+                summary.rtoRate > 20 ? 'text-red-700 dark:text-red-300' :
+                summary.rtoRate > 10 ? 'text-amber-700 dark:text-amber-300' :
+                'text-emerald-700 dark:text-emerald-300'
+              )}>
+                {summary.rtoRate}%
+              </p>
+              {rtoDelta != null && (
+                <p className={clsx('mt-1 text-xs font-semibold', rtoDelta < 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400')}>
+                  {rtoDelta < 0 ? '▼' : '▲'} {Math.abs(rtoDelta)} pts vs prior {days}d
+                </p>
+              )}
+            </div>
+          </div>
+        </section>
+
+        {/* Urgent Orders Banner */}
         {needsReview > 0 && (
           <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 dark:border-amber-800 dark:bg-amber-900/20">
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex items-start gap-4">
-                <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl bg-amber-100 dark:bg-amber-900/40">
-                  <svg className="h-6 w-6 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-4">
+                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-amber-100 dark:bg-amber-900/40">
+                  <svg className="h-5 w-5 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
                   </svg>
                 </div>
                 <div>
-                  <p className="text-base font-semibold text-amber-900 dark:text-amber-200">
-                    {needsReview} Orders Need Immediate Review
-                  </p>
-                  <div className="mt-1.5 flex flex-wrap gap-4 text-sm text-amber-700 dark:text-amber-400">
-                    {riskExposure > 0 && (
-                      <span>Estimated risk exposure: <strong>PKR {(riskExposure / 1000).toFixed(0)}K</strong></span>
-                    )}
-                    {avgRiskScore > 0 && (
-                      <span>Avg risk score: <strong>{avgRiskScore}/100</strong></span>
-                    )}
+                  <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">{needsReview} Orders Require Immediate Review</p>
+                  <div className="mt-0.5 flex flex-wrap gap-4 text-xs text-amber-700 dark:text-amber-400">
+                    {riskExposure > 0 && <span>Risk exposure: <strong>PKR {formatK(riskExposure)}</strong></span>}
+                    <span>Avg risk score: <strong>{summary.avgRiskScore}/100</strong></span>
                   </div>
                 </div>
               </div>
-              <Link
-                href="/orders?recommendation=VERIFY"
-                className="flex-shrink-0 rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-700"
-              >
+              <Link href="/orders?recommendation=VERIFY" className="self-start rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 transition-colors sm:self-auto sm:flex-shrink-0">
                 Review Now →
               </Link>
             </div>
           </div>
         )}
 
-        {/* KPI Cards */}
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
-          <StatCard
-            label="Total Orders"
-            value={summary.totalOrders.toLocaleString()}
-            change={totalDelta}
-            changeType={totalDelta !== undefined ? (totalDelta >= 0 ? 'up' : 'down') : 'neutral'}
-          />
-          <StatCard
-            label="High Risk"
-            value={summary.blocked.toLocaleString()}
-            change={blockedDelta}
-            changeType={blockedDelta !== undefined ? (blockedDelta > 0 ? 'down' : 'up') : 'neutral'}
-            icon={
-              <svg className="h-6 w-6 text-red-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-              </svg>
-            }
-          />
-          <StatCard
-            label="Suspicious"
-            value={summary.verify.toLocaleString()}
-            change={verifyDelta}
-            changeType={verifyDelta !== undefined ? (verifyDelta > 0 ? 'down' : 'up') : 'neutral'}
-          />
-          <StatCard label="Approved" value={summary.approved.toLocaleString()} />
-          <StatCard
-            label="RTO Rate"
-            value={`${summary.rtoRate}%`}
-            change={rtoDelta}
-            changeType={rtoDelta !== undefined ? (rtoDelta > 0 ? 'down' : 'up') : 'neutral'}
-          />
-          <StatCard
-            label="Revenue Protected"
-            value={`PKR ${(revenueProtected / 1000).toFixed(0)}K`}
-            highlight
-          />
-        </div>
-
-        {/* Bottom Row: Model Health + Recent Activity */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          {/* Model Health Widget */}
-          <Card title="AI Model Health">
-            {mlMetrics ? (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600 dark:text-slate-400">Status</span>
-                  <span className={clsx(
-                    'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium',
-                    isHealthy
-                      ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
-                      : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400'
-                  )}>
-                    <span className={clsx('h-1.5 w-1.5 rounded-full', isHealthy ? 'bg-green-500' : 'bg-amber-500')} />
-                    {isHealthy ? 'Healthy' : 'Needs Monitoring'}
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="rounded-lg bg-gray-50 dark:bg-slate-700/50 p-3">
-                    <p className="text-xs text-gray-500 dark:text-slate-400 uppercase tracking-wide">Accuracy</p>
-                    <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-slate-100">{accuracy !== null ? `${accuracy}%` : '—'}</p>
-                  </div>
-                  <div className="rounded-lg bg-gray-50 dark:bg-slate-700/50 p-3">
-                    <p className="text-xs text-gray-500 dark:text-slate-400 uppercase tracking-wide">F1 Score</p>
-                    <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-slate-100">{f1Score !== null ? `${f1Score}%` : '—'}</p>
+        {/* Layer 3: Trends */}
+        <section>
+          <p className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-gray-400 dark:text-slate-500">Trends</p>
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <div className="lg:col-span-2">
+              <Card title="Capital Protected — Daily Trend">
+                <RevenueSavedChart data={revenueTrend} />
+              </Card>
+            </div>
+            <Card title="RTO Rate Comparison">
+              <div className="space-y-5 py-2">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 dark:text-slate-500">Current {days === 1 ? '24h' : `${days}d`}</p>
+                  <div className="flex items-end gap-2 mt-1">
+                    <p className={clsx(
+                      'text-4xl font-bold',
+                      summary.rtoRate > 20 ? 'text-red-600 dark:text-red-400' :
+                      summary.rtoRate > 10 ? 'text-amber-600 dark:text-amber-400' :
+                      'text-emerald-600 dark:text-emerald-400'
+                    )}>
+                      {summary.rtoRate}%
+                    </p>
+                    {rtoDelta != null && (
+                      <span className={clsx('mb-1.5 text-sm font-semibold', rtoDelta < 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400')}>
+                        {rtoDelta < 0 ? '▼' : '▲'}{Math.abs(rtoDelta)} pts
+                      </span>
+                    )}
                   </div>
                 </div>
-                {mlMetrics.model_version && (
-                  <p className="text-xs text-gray-400 dark:text-slate-500">
-                    Model version: <span className="font-mono">{mlMetrics.model_version}</span>
-                  </p>
+                {priorRtoRate != null && (
+                  <div className="border-t border-gray-100 dark:border-slate-700 pt-4">
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 dark:text-slate-500">Prior {days === 1 ? '24h' : `${days}d`}</p>
+                    <p className="mt-1 text-2xl font-semibold text-gray-400 dark:text-slate-500">{priorRtoRate}%</p>
+                  </div>
                 )}
-                <Link
-                  href="/ml"
-                  className="block text-center text-sm text-blue-600 dark:text-blue-400 hover:underline"
-                >
-                  View full ML insights →
-                </Link>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center py-8 gap-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gray-100 dark:bg-slate-700">
-                  <svg className="h-6 w-6 text-gray-400 dark:text-slate-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5" />
-                  </svg>
+                <div className="border-t border-gray-100 dark:border-slate-700 pt-4 space-y-2">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-400 dark:text-slate-500">Pakistan industry avg</span>
+                    <span className="font-medium text-gray-600 dark:text-slate-300">25–35%</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-400 dark:text-slate-500">Your performance</span>
+                    <span className={clsx('font-semibold', summary.rtoRate < 20 ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400')}>
+                      {summary.rtoRate < 20 ? '✓ Above average' : 'Needs attention'}
+                    </span>
+                  </div>
                 </div>
-                <p className="text-sm text-gray-500 dark:text-slate-400">ML service unavailable</p>
               </div>
-            )}
-          </Card>
+            </Card>
+          </div>
+        </section>
 
-          {/* Top Fraud Signals (mini) */}
-          <Card title="Top Fraud Signals">
-            {!data.topFraudSignals?.length ? (
-              <div className="flex flex-col items-center justify-center py-8 gap-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gray-100 dark:bg-slate-700">
-                  <svg className="h-6 w-6 text-gray-400 dark:text-slate-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
-                  </svg>
+        {/* Layer 4: Risk & Intelligence */}
+        <section>
+          <p className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-gray-400 dark:text-slate-500">Risk & Intelligence</p>
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <Card title="Risk Distribution">
+              {riskChartData.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-10 gap-2">
+                  <p className="text-sm text-gray-400 dark:text-slate-500">No risk data yet</p>
                 </div>
-                <p className="text-sm text-gray-500 dark:text-slate-400">No fraud signals recorded yet</p>
-                <p className="text-xs text-gray-400 dark:text-slate-500">Signals will appear as orders are processed</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {data.topFraudSignals.slice(0, 6).map((signal: any, idx: number) => {
-                  const count = parseInt(signal.count || 0);
-                  const maxCount = parseInt(data.topFraudSignals[0]?.count || 1);
-                  const pct = maxCount > 0 ? (count / maxCount) * 100 : 0;
-                  return (
-                    <div key={idx} className="flex items-center gap-3">
-                      <div className="flex-1 min-w-0">
-                        <div className="mb-1 flex items-center justify-between gap-2">
-                          <span className="text-xs font-medium text-gray-700 dark:text-slate-300 truncate">
-                            {(signal.signal_name || signal.signal_type || signal.signal || 'Unknown').replace(/_/g, ' ')}
-                          </span>
-                          <span className="text-xs text-gray-500 dark:text-slate-400 flex-shrink-0">{count}</span>
-                        </div>
-                        <div className="h-1.5 overflow-hidden rounded-full bg-gray-100 dark:bg-slate-700">
-                          <div
-                            className="h-1.5 rounded-full bg-red-500 transition-all"
-                            style={{ width: `${pct}%` }}
-                          />
-                        </div>
-                      </div>
+              ) : (
+                <RiskDistributionChart data={riskChartData} />
+              )}
+            </Card>
+            <Card title="Primary Risk Triggers">
+              <FraudTriggerChart data={data.topFraudSignals} />
+            </Card>
+          </div>
+        </section>
+
+        {/* Layer 5: Operational Action */}
+        <section>
+          <p className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-gray-400 dark:text-slate-500">Operational Action</p>
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <Card title="Orders Requiring Action" subtitle="Highest risk, awaiting review">
+              {urgentOrders.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8 gap-2">
+                  <div className="h-10 w-10 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
+                    <svg className="h-5 w-5 text-emerald-600 dark:text-emerald-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                    </svg>
+                  </div>
+                  <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">All clear — no pending reviews</p>
+                </div>
+              ) : (
+                <div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-gray-100 dark:border-slate-700 text-[10px] uppercase tracking-widest text-gray-400 dark:text-slate-500">
+                          <th className="py-2 text-left">Customer</th>
+                          <th className="py-2 text-right">Amount</th>
+                          <th className="py-2 text-right">Risk Score</th>
+                          <th className="py-2 text-right">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {urgentOrders.map((order: any) => (
+                          <tr key={order.id} className="border-b border-gray-50 dark:border-slate-700/50">
+                            <td className="py-2.5">
+                              <p className="font-medium text-gray-900 dark:text-slate-200">{order.customer_name || '—'}</p>
+                              <p className="text-xs text-gray-400 dark:text-slate-500">{order.shipping_city || ''}</p>
+                            </td>
+                            <td className="py-2.5 text-right text-gray-600 dark:text-slate-400 text-xs">
+                              PKR {parseInt(order.total_amount || 0).toLocaleString()}
+                            </td>
+                            <td className="py-2.5 text-right">
+                              <span className={clsx(
+                                'inline-flex rounded-full px-2 py-0.5 text-xs font-bold',
+                                parseFloat(order.risk_score) >= 70
+                                  ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+                                  : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400'
+                              )}>
+                                {order.risk_score ? Math.round(parseFloat(order.risk_score)) : '—'}
+                              </span>
+                            </td>
+                            <td className="py-2.5 text-right">
+                              <Link href={`/orders/${order.id}`} className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline">
+                                Review →
+                              </Link>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {needsReview > 5 && (
+                    <div className="mt-3 text-right">
+                      <Link href="/orders?recommendation=VERIFY" className="text-xs text-blue-600 dark:text-blue-400 hover:underline">
+                        View all {needsReview} pending orders →
+                      </Link>
                     </div>
-                  );
-                })}
-                <Link
-                  href="/analytics"
-                  className="block pt-1 text-center text-sm text-blue-600 dark:text-blue-400 hover:underline"
-                >
-                  View full analytics →
-                </Link>
-              </div>
-            )}
-          </Card>
-        </div>
+                  )}
+                </div>
+              )}
+            </Card>
+
+            <Card title="High-Risk Cities" subtitle="Top return-to-origin locations">
+              {data.topRtoCities.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8">
+                  <p className="text-sm text-gray-400 dark:text-slate-500">No city data yet</p>
+                  <p className="text-xs text-gray-400 dark:text-slate-500 mt-1">Appears after 5+ orders per city</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-100 dark:border-slate-700 text-[10px] uppercase tracking-widest text-gray-400 dark:text-slate-500">
+                        <th className="py-2 text-left">City</th>
+                        <th className="py-2 text-right">Orders</th>
+                        <th className="py-2 text-right">RTO</th>
+                        <th className="py-2 text-right">Rate</th>
+                        <th className="py-2 text-right">Risk</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.topRtoCities.map((city: any) => {
+                        const rate = parseFloat(city.rto_rate);
+                        return (
+                          <tr key={city.city} className="border-b border-gray-50 dark:border-slate-700/50">
+                            <td className="py-2.5 font-medium text-gray-900 dark:text-slate-200">{city.city}</td>
+                            <td className="py-2.5 text-right text-gray-500 dark:text-slate-400">{city.total}</td>
+                            <td className="py-2.5 text-right text-red-600 dark:text-red-400">{city.rto}</td>
+                            <td className="py-2.5 text-right">
+                              <span className={clsx('font-semibold', rate > 30 ? 'text-red-600 dark:text-red-400' : rate > 15 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400')}>
+                                {city.rto_rate}%
+                              </span>
+                            </td>
+                            <td className="py-2.5 text-right">
+                              <span className={clsx(
+                                'inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold',
+                                rate > 30 ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' :
+                                rate > 15 ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400' :
+                                'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400'
+                              )}>
+                                {rate > 30 ? 'HIGH' : rate > 15 ? 'MEDIUM' : 'LOW'}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Card>
+          </div>
+        </section>
+
+        {/* Layer 6: AI Engine Status */}
+        <section>
+          <p className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-gray-400 dark:text-slate-500">AI Engine Status</p>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+            <AIMetricCard
+              label="Model Accuracy"
+              value={accuracy != null ? `${accuracy}%` : '—'}
+              subtitle={accuracy != null ? (accuracy >= 80 ? 'Performing well' : 'Below threshold') : 'No active model'}
+              status={isModelHealthy === true ? 'healthy' : isModelHealthy === false ? 'warning' : 'neutral'}
+            />
+            <AIMetricCard
+              label="F1 Score"
+              value={f1 != null ? `${f1}%` : '—'}
+              subtitle="Precision–recall balance"
+              status={f1 != null ? (f1 >= 75 ? 'healthy' : 'warning') : 'neutral'}
+            />
+            <AIMetricCard
+              label="Avg Confidence"
+              value={perfData?.avgConfidence != null ? `${Math.round(perfData.avgConfidence)}%` : '—'}
+              subtitle="Per prediction"
+              status={perfData?.avgConfidence != null ? (perfData.avgConfidence >= 70 ? 'healthy' : 'warning') : 'neutral'}
+            />
+            <AIMetricCard
+              label="False Positive Rate"
+              value={perfData?.falsePositiveRate != null ? `${perfData.falsePositiveRate}%` : '—'}
+              subtitle={perfData?.falsePositiveRate != null ? 'Blocked orders later delivered' : 'Needs feedback data'}
+              status={perfData?.falsePositiveRate != null ? (perfData.falsePositiveRate <= 10 ? 'healthy' : 'warning') : 'neutral'}
+            />
+            <AIMetricCard
+              label="Model Last Updated"
+              value={modelAge != null ? `${modelAge}d ago` : '—'}
+              subtitle={modelVersion || 'Unknown version'}
+              status={modelAge != null ? (modelAge <= 30 ? 'healthy' : 'warning') : 'neutral'}
+            />
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 dark:text-slate-500">Repeat Offender Orders</p>
+              <p className="mt-1 text-xl font-bold text-gray-900 dark:text-slate-100">
+                {perfData?.repeatOffenderOrders != null ? perfData.repeatOffenderOrders : '—'}
+              </p>
+              <p className="text-[10px] text-gray-400 dark:text-slate-500">Orders from phones with prior RTO history</p>
+            </div>
+
+            <div className="rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 dark:text-slate-500">Manual Override Rate</p>
+              <p className="mt-1 text-xl font-bold text-gray-900 dark:text-slate-100">
+                {perfData?.overrideRate != null ? `${perfData.overrideRate}%` : '—'}
+              </p>
+              <p className="text-[10px] text-gray-400 dark:text-slate-500">Human corrections to AI decisions</p>
+            </div>
+
+            <div className={clsx(
+              'rounded-xl border px-4 py-3',
+              perfData?.fraudVelocityIndex != null && perfData.fraudVelocityIndex > 2
+                ? 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/10'
+                : 'border-gray-200 bg-white dark:border-slate-700 dark:bg-slate-800'
+            )}>
+              <p className={clsx(
+                'text-[10px] font-semibold uppercase tracking-widest',
+                perfData?.fraudVelocityIndex != null && perfData.fraudVelocityIndex > 2
+                  ? 'text-red-500 dark:text-red-400'
+                  : 'text-gray-400 dark:text-slate-500'
+              )}>
+                Fraud Velocity Index
+              </p>
+              <p className={clsx(
+                'mt-1 text-xl font-bold',
+                perfData?.fraudVelocityIndex != null && perfData.fraudVelocityIndex > 2
+                  ? 'text-red-700 dark:text-red-300'
+                  : 'text-gray-900 dark:text-slate-100'
+              )}>
+                {perfData?.fraudVelocityIndex != null ? `${perfData.fraudVelocityIndex}×` : '—'}
+              </p>
+              <p className={clsx(
+                'text-[10px]',
+                perfData?.fraudVelocityIndex != null && perfData.fraudVelocityIndex > 2
+                  ? 'text-red-500 dark:text-red-400'
+                  : 'text-gray-400 dark:text-slate-500'
+              )}>
+                {perfData?.fraudVelocityIndex != null && perfData.fraudVelocityIndex > 2
+                  ? '⚠ Unusual spike in last hour'
+                  : 'Normal fraud activity level'}
+              </p>
+            </div>
+          </div>
+        </section>
+
       </div>
     </DashboardLayout>
   );

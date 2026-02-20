@@ -123,12 +123,12 @@ export default function AnalyticsPage() {
     <DashboardLayout>
       <div className="space-y-8">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-slate-100">Fraud Intelligence Lab</h1>
+            <h1 className="text-xl font-bold text-gray-900 dark:text-slate-100 sm:text-2xl">Fraud Intelligence Lab</h1>
             <p className="text-sm text-gray-500 dark:text-slate-400">Strategic analysis and model performance</p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             <button
               onClick={exportCSV}
               className="flex items-center gap-2 rounded-lg border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-slate-300 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors"
