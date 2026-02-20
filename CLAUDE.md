@@ -262,13 +262,23 @@ cod-fraud-saas/
 4. **Blacklist** (`/blacklist`) — CRUD table with type tabs (all/phone/email/ip/address/name). Add form. Reason column shows info icon for long reasons → opens modal.
 5. **ML Insights** (`/ml`) — Model info, 5 performance metrics, confusion matrix (7d/30d/90d), top 10 feature importance bars, model versions table, service health.
 6. **Settings** (`/settings`) — Account info, plan & usage bar, scoring threshold sliders (visual gradient bar), API key management, Platform Integrations (Shopify OAuth card + WooCommerce/Magento/Joomla/Custom webhook cards with copy URL + expandable instructions).
-7. **Billing** (`/billing`) — Plan info and billing details.
+7. **Billing** (`/billing`) — Full-width. Current plan as a large gradient card with usage bar and days remaining. Plans grid (`grid-cols-1 sm:grid-cols-2 xl:grid-cols-4`) with bigger cards, popular badge, current plan ring. Improved invoice history table with hover states.
+8. **Login** (`/login`) — Split-screen: left dark panel (hidden on mobile) with custom SVG shield logo + feature list; right white panel with form. Show/hide password, labels above inputs, responsive tab switcher.
 
 ## UI Components
 - **Modal** (`components/ui/modal.tsx`) — Reusable: sizes (sm/md/lg), variants (default/danger/warning), ESC to close, backdrop click to close
 - **Card** (`components/ui/card.tsx`) — Has title, subtitle, action props
 - All pages use full width (no max-w constraints)
 - **Fully responsive**: all pages work on mobile/tablet/desktop. Grids use `grid-cols-1 sm:grid-cols-2 xl:grid-cols-4` pattern. Headers stack on mobile (`flex-col sm:flex-row`). Sidebar slides in from left on mobile (hamburger in Topbar).
+
+## Sidebar Behavior
+- **Desktop collapsed**: `w-[68px]` — shows icons only. Content area uses `lg:pl-[68px]`
+- **Desktop expanded**: `w-64` — shows icons + labels. Content area uses `lg:pl-64`
+- **Hover-expand**: when collapsed, hovering over sidebar temporarily shows full width (floating, no content shift), with `shadow-2xl`. Leaving collapses back.
+- **Toggle button**: at bottom of sidebar — circular arrow button. Left arrow = collapse, Right arrow = expand. Shows "Collapse sidebar" text when open.
+- **Mobile**: sidebar slides in from left (hamburger in Topbar), always full width, overlay backdrop
+- `collapsed` state lives in `DashboardLayout` and is passed as props to `Sidebar`
+- Active nav item: shows blue dot indicator on the right
 
 ## api.ts — All Exported API Objects
 ```typescript
