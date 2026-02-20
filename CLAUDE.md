@@ -39,7 +39,7 @@
 | Redis | Managed | Requires auth (password in URL) |
 
 ### Environment Variables
-- **Backend (Railway)**: `DATABASE_URL` (Postgres public URL), `REDIS_URL` (Redis public URL), `JWT_SECRET`, `ML_SERVICE_URL` (ML internal or public URL), `CORS_ORIGINS` (Vercel frontend URL), `API_KEY_ENCRYPTION_SECRET`
+- **Backend (Railway)**: `DATABASE_URL` (Postgres public URL), `REDIS_URL` (Redis public URL), `JWT_SECRET`, `ML_SERVICE_URL` (ML internal or public URL), `CORS_ORIGINS` (Vercel frontend URL), `API_KEY_ENCRYPTION_SECRET`, `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET`, `SHOPIFY_SCOPES`
 - **ML Service (Railway)**: `PORT` (Railway sets dynamically), `DATABASE_URL`, `CORS_ORIGINS`
 - **Frontend (Vercel)**: `NEXT_PUBLIC_API_URL` = `https://cod-fraud-saas-production.up.railway.app/api/v1`
 
@@ -50,6 +50,7 @@
 - ML model trains during Docker build: `RUN python scripts/generate_synthetic_data.py --n 20000 && python train.py --csv data/training_data.csv`
 - Backend CORS uses `CORS_ORIGINS` env var in production, `true` in development
 - **DO NOT use Railway internal networking** (`*.railway.internal`) — it's unreliable, use public URLs
+- Vercel auto-deploy from GitHub can disconnect — if broken, deploy manually: `vercel --prod --yes` from repo root (not frontend dir). `.vercel/project.json` must exist at root.
 
 ## Project Structure
 ```
@@ -57,24 +58,25 @@ cod-fraud-saas/
 ├── backend/               # Node.js API server
 │   ├── Dockerfile         # Railway deployment (multi-stage build)
 │   ├── src/
-│   │   ├── app.ts         # Fastify app setup (CORS, rate limit, JWT)
+│   │   ├── app.ts         # Fastify app setup (CORS, rate limit, JWT) + shopifyRoutes registered
 │   │   ├── server.ts      # Entry point + BullMQ worker startup
-│   │   ├── config/        # Environment config (index.ts)
+│   │   ├── config/        # Environment config (index.ts) — includes shopify: {clientId, clientSecret, scopes}
 │   │   ├── db/
 │   │   │   ├── connection.ts  # PostgreSQL pool + query helper
-│   │   │   ├── schema.sql     # Full schema (14 tables)
+│   │   │   ├── schema.sql     # Full schema (15 tables incl. shopify_connections)
 │   │   │   └── migrate.ts     # Auto-migration with 5 retries
 │   │   ├── middlewares/    # JWT auth, API key auth, validation, metrics, security
 │   │   ├── plugins/       # Platform plugins (Shopify, WooCommerce, Magento, Joomla)
 │   │   ├── routes/
-│   │   │   ├── webhook.ts     # POST /webhook/:platform — receives orders
-│   │   │   ├── orders.ts      # CRUD + override + risk breakdown
-│   │   │   ├── blacklist.ts   # Add/list/remove blacklist entries
-│   │   │   ├── analytics.ts   # Dashboard analytics + RTO report + feedback
-│   │   │   ├── auth.ts        # Register, login, profile, plan, API keys
-│   │   │   ├── ml.ts          # ML metrics, confusion matrix, thresholds, versions, health
-│   │   │   ├── settings.ts    # Threshold settings
-│   │   │   └── health.ts      # /health, /ready, /live, /metrics
+│   │   │   ├── webhook.ts         # POST /webhook/:platform — receives orders
+│   │   │   ├── orders.routes.ts   # CRUD + override + risk breakdown + external lookup
+│   │   │   ├── blacklist.routes.ts # Add/list/remove blacklist entries
+│   │   │   ├── analytics.routes.ts # Dashboard analytics + RTO report + feedback + performance
+│   │   │   ├── auth.ts            # Register, login, profile, plan, API keys
+│   │   │   ├── ml.ts              # ML metrics, confusion matrix, thresholds, versions, health
+│   │   │   ├── shopify.routes.ts  # NEW — Shopify OAuth (install/callback/status/disconnect)
+│   │   │   ├── settings.ts        # Threshold settings
+│   │   │   └── health.ts          # /health, /ready, /live, /metrics
 │   │   ├── services/
 │   │   │   ├── fraud-engine/
 │   │   │   │   ├── engine.ts      # FraudEngine class — orchestrates 3-layer scoring
@@ -119,21 +121,23 @@ cod-fraud-saas/
 │   ├── vercel.json        # Vercel deployment config + security headers
 │   ├── src/
 │   │   ├── app/
-│   │   │   ├── page.tsx           # Dashboard (6 KPIs, 4 charts, cities, platforms)
+│   │   │   ├── page.tsx           # Dashboard — "Revenue Protection Command Center"
 │   │   │   ├── orders/page.tsx    # Orders table + filters + override modal
 │   │   │   ├── orders/[id]/page.tsx # Order detail + 3-layer risk breakdown
-│   │   │   ├── analytics/page.tsx # Analytics (kept but removed from nav — duplicate of dashboard)
+│   │   │   ├── analytics/page.tsx # "Fraud Intelligence Lab" — 4 sections, Export CSV
 │   │   │   ├── blacklist/page.tsx # Blacklist CRUD + reason modals
 │   │   │   ├── ml/page.tsx        # ML metrics, confusion matrix, feature importance, versions
-│   │   │   ├── settings/page.tsx  # Account, plan, thresholds (visual slider), API keys
+│   │   │   ├── settings/page.tsx  # Account, plan, thresholds, API keys, Platform Integrations
 │   │   │   ├── billing/page.tsx   # Billing & plan info
 │   │   │   └── login/page.tsx     # Login page
 │   │   ├── components/
 │   │   │   ├── layout/
-│   │   │   │   ├── dashboard-layout.tsx  # Main layout wrapper
-│   │   │   │   └── sidebar.tsx           # Navigation sidebar (5 items: Dashboard, Orders, Blacklist, ML, Settings, Billing)
+│   │   │   │   ├── dashboard-layout.tsx  # Main layout wrapper (lg:pl-64, p-4 sm:p-6)
+│   │   │   │   ├── sidebar.tsx           # Nav sidebar — 7 items: Dashboard, Orders, Analytics, Blacklist, ML Insights, Settings, Billing
+│   │   │   │   ├── Topbar.tsx            # Sticky top bar with hamburger menu (mobile), theme toggle
+│   │   │   │   └── StoreSwitcher.tsx     # Store/tenant switcher in topbar
 │   │   │   ├── charts/
-│   │   │   │   ├── RiskDistributionChart.tsx  # Pie chart
+│   │   │   │   ├── RiskDistributionChart.tsx  # Pie/donut chart
 │   │   │   │   ├── RevenueSavedChart.tsx      # Area chart
 │   │   │   │   ├── RiskTrendChart.tsx         # Stacked bar chart
 │   │   │   │   └── FraudTriggerChart.tsx      # Horizontal bar chart
@@ -149,9 +153,18 @@ cod-fraud-saas/
 │   │   ├── context/       # ThemeProvider (next-themes), StoreContext
 │   │   ├── hooks/         # useAuth (JWT token management)
 │   │   └── lib/
-│   │       ├── api.ts     # Axios instance + all API functions (ordersApi, blacklistApi, analyticsApi, mlApi)
+│   │       ├── api.ts     # Axios instance + all API functions
 │   │       └── utils.ts   # Utility functions
 │   └── .env.example
+├── shopify-extension/     # Shopify Admin Extension (order risk badge)
+│   ├── README.md          # Partner account setup guide
+│   ├── shopify.app.toml   # App config (CLIENT_ID placeholder)
+│   ├── package.json
+│   └── extensions/
+│       └── order-risk-badge/
+│           ├── shopify.extension.toml  # targets admin.order-details.block.render
+│           └── src/
+│               └── OrderRiskBadge.tsx  # Fetches risk data via API key, shows badge
 ├── docker/                # Docker Compose for local dev + legacy Dockerfiles
 ├── .github/workflows/ci.yml  # CI pipeline (backend typecheck+build, ML validation, frontend build)
 └── infra/                 # Legacy K8s/Nginx configs (not used in Railway deployment)
@@ -166,10 +179,11 @@ cod-fraud-saas/
 - **Queue**: BullMQ for async order scoring — plan-based priority (enterprise=1, free=5)
 - **ML Pipeline**: Data collection → validation → versioning → training → drift detection → auto-retrain
 - **Cold Start Strategy**: Synthetic 20K samples (82.85% accuracy) → gradually replaced by real data as orders accumulate
+- **Shopify OAuth**: Install → HMAC-verified callback → access_token exchange → webhook registration → saved to `shopify_connections` table
 
 ## Database
-- PostgreSQL 16 with 14 tables (full schema: `backend/src/db/schema.sql`)
-- Key tables: `tenants`, `users`, `orders`, `fraud_scores`, `phones`, `blacklist`, `model_versions`, `prediction_logs`, `performance_snapshots`, `risk_logs`, `api_keys`
+- PostgreSQL 16 with 15 tables (full schema: `backend/src/db/schema.sql`)
+- Key tables: `tenants`, `users`, `orders`, `fraud_scores`, `phones`, `blacklist`, `model_versions`, `prediction_logs`, `performance_snapshots`, `risk_logs`, `api_keys`, `shopify_connections`
 - Auto-migration on startup via `backend/src/db/migrate.ts` (non-fatal, 5 retries)
 
 ## API Endpoints
@@ -185,10 +199,11 @@ cod-fraud-saas/
 - `POST /api/v1/webhook/:platform` — Receive orders (shopify, woocommerce, magento, joomla)
 
 ### Orders
-- `GET /api/v1/orders` — List orders (filters: recommendation, search, status, risk_level, page, limit)
+- `GET /api/v1/orders` — List orders (filters: recommendation, search, status, risk_level, sortBy, sortOrder, page, limit)
 - `GET /api/v1/orders/:id` — Order detail
 - `GET /api/v1/orders/risk/:orderId` — 3-layer risk score breakdown
 - `POST /api/v1/orders/:id/override` — Manual override (APPROVE/BLOCK)
+- `GET /api/v1/orders/external/:platform/:externalOrderId` — External order lookup by API key (for Shopify Extension)
 
 ### Blacklist
 - `POST /api/v1/blacklist` — Add entry (type: phone/email/ip/address/name)
@@ -199,6 +214,8 @@ cod-fraud-saas/
 - `GET /api/v1/analytics` — Dashboard data (summary, dailyOrders, topFraudSignals, riskDistribution, topRtoCities, platformBreakdown)
 - `GET /api/v1/analytics/rto-report` — RTO report
 - `POST /api/v1/analytics/rto-feedback` — Delivery outcome feedback
+- `GET /api/v1/analytics/performance` — AI performance metrics (falseNegativeRate, falsePositiveRate, overrideRate, repeatOffenderOrders, avgConfidence, fraudVelocityIndex)
+- `GET /api/v1/analytics/override-stats` — Override statistics by type + accuracy + reasons
 
 ### ML
 - `GET /api/v1/ml/metrics` — Model performance (accuracy, precision, recall, F1, AUC-ROC, feature importance)
@@ -206,6 +223,14 @@ cod-fraud-saas/
 - `POST /api/v1/ml/threshold` — Update scoring thresholds (block_threshold, verify_threshold)
 - `GET /api/v1/ml/versions` — List model versions
 - `GET /api/v1/ml/health` — ML service health status
+- `GET /api/v1/ml/performance-history` — Historical performance snapshots
+- `POST /api/v1/ml/generate-snapshot` — Trigger performance snapshot
+
+### Shopify OAuth
+- `GET /api/v1/shopify/install` — Redirect to Shopify OAuth (params: shop, tenant_id)
+- `GET /api/v1/shopify/callback` — OAuth callback, HMAC verify, token exchange, webhook registration
+- `GET /api/v1/shopify/status` — Connection status (JWT auth)
+- `DELETE /api/v1/shopify/disconnect` — Remove connection (JWT auth)
 
 ### Settings
 - `GET /api/v1/settings/thresholds` — Get current thresholds
@@ -231,18 +256,29 @@ cod-fraud-saas/
 - **Feature name alignment**: Backend `toMLFeatures()` must match `pipeline/feature_map.py` exactly
 
 ## Frontend Pages (Navigation Order)
-1. **Dashboard** (`/`) — 6 KPI cards, 4 charts (risk distribution, revenue saved, risk trend, fraud triggers), cities table, platform breakdown. Has 7d/30d/90d period selector.
-2. **Orders** (`/orders`) — Filterable table (search, risk level, decision, status). Override actions use professional modal (not browser confirm). Risk summary shows inline with info icon for long text.
-3. **Blacklist** (`/blacklist`) — CRUD table with type tabs (all/phone/email/ip/address/name). Add form. Reason column shows info icon for long reasons → opens modal.
-4. **ML Insights** (`/ml`) — Model info, 5 performance metrics, confusion matrix (7d/30d/90d), top 10 feature importance bars, model versions table, service health.
-5. **Settings** (`/settings`) — Account info, plan & usage bar, scoring threshold sliders (visual gradient bar), API key management.
-6. **Billing** (`/billing`) — Plan info and billing details.
-7. **Analytics** (`/analytics`) — Still exists as page but removed from sidebar nav (duplicate of Dashboard).
+1. **Dashboard** (`/`) — "Revenue Protection Command Center". 5 parallel API calls. Sections: Financial Impact (Capital Protected, Est. Loss Prevented, Net Revenue Saved, Protection ROI with sparklines + prior period delta), Risk Overview (Total Orders, Blocked, Under Review, RTO Rate with color coding), Urgent Review Banner, Trends (Capital Protected trend chart + RTO Rate Comparison), Risk & Intelligence (donut + fraud triggers), Operational Action (urgent orders table + high-risk cities), AI Engine Status (Model Accuracy, F1, Avg Confidence, False Positive Rate, Model Age + Repeat Offenders, Override Rate, Fraud Velocity Index). Period selector: 24h / 7d.
+2. **Orders** (`/orders`) — Filterable table (search, risk level, decision, status, sortBy). Override actions use professional modal. Risk summary truncates with info icon. Table wrapped in overflow-x-auto for mobile.
+3. **Analytics** (`/analytics`) — "Fraud Intelligence Lab". 4 sections: Performance Metrics (8 KPIs: 4 analytics + 4 ML), Trend Analysis (3 charts + 7/30/90d selector), Fraud Intelligence (signals + platform breakdown + cities table), Advanced (collapsible, 3 Coming Soon cards). Export CSV button.
+4. **Blacklist** (`/blacklist`) — CRUD table with type tabs (all/phone/email/ip/address/name). Add form. Reason column shows info icon for long reasons → opens modal.
+5. **ML Insights** (`/ml`) — Model info, 5 performance metrics, confusion matrix (7d/30d/90d), top 10 feature importance bars, model versions table, service health.
+6. **Settings** (`/settings`) — Account info, plan & usage bar, scoring threshold sliders (visual gradient bar), API key management, Platform Integrations (Shopify OAuth card + WooCommerce/Magento/Joomla/Custom webhook cards with copy URL + expandable instructions).
+7. **Billing** (`/billing`) — Plan info and billing details.
 
 ## UI Components
 - **Modal** (`components/ui/modal.tsx`) — Reusable: sizes (sm/md/lg), variants (default/danger/warning), ESC to close, backdrop click to close
 - **Card** (`components/ui/card.tsx`) — Has title, subtitle, action props
-- All pages use full width (no max-w constraints) — Dashboard, Orders, Blacklist, ML, Settings all fill available space
+- All pages use full width (no max-w constraints)
+- **Fully responsive**: all pages work on mobile/tablet/desktop. Grids use `grid-cols-1 sm:grid-cols-2 xl:grid-cols-4` pattern. Headers stack on mobile (`flex-col sm:flex-row`). Sidebar slides in from left on mobile (hamburger in Topbar).
+
+## api.ts — All Exported API Objects
+```typescript
+authApi    — login, register
+ordersApi  — list, get, getRisk, override
+blacklistApi — list, add, remove
+mlApi      — metrics, confusionMatrix, threshold, versions, health, performanceHistory, generateSnapshot
+analyticsApi — dashboard, rtoReport, submitFeedback, overrideStats, performance
+shopifyApi — status, disconnect
+```
 
 ## Common Commands
 ```bash
@@ -265,6 +301,9 @@ python scripts/export_training_data.py                  # Export from DB
 
 # Git (all changes auto-deploy)
 git add <files> && git commit -m "message" && git push origin main
+
+# Vercel manual deploy (when auto-deploy broken)
+vercel --prod --yes   # run from repo root (not frontend dir)
 ```
 
 ## Important Rules for Claude
@@ -275,6 +314,8 @@ git add <files> && git commit -m "message" && git push origin main
 5. **Do not run local Docker** — Owner said "localy run kernay ki zarot nhi hy"
 6. **Professional quality** — Owner explicitly said "please act a professional" — demo-ready product
 7. **Never use `-uall` flag** with git status (can cause memory issues on large repos)
+8. **Mobile first** — All frontend changes must be responsive (mobile/tablet/laptop/large screen)
+9. **Minimize comments** — Owner said no unnecessary comments or explanations in code, just code
 
 ## Known Fixed Issues (Don't Re-Introduce)
 - BullMQ Redis must include password from URL (`scoring-queue.ts` line 13-18)
@@ -282,3 +323,14 @@ git add <files> && git commit -m "message" && git push origin main
 - Migration must be non-fatal (exits 0 even on failure, 5 retries)
 - Backend CORS must use `CORS_ORIGINS` env var in production
 - `shap` package commented out in requirements.txt (requires cmake, fails in CI)
+- External order lookup (`/orders/external/:platform/:id`) uses `o.risk_score, o.risk_level, o.recommendation` from orders table — NOT from fraud_scores table (those columns don't exist on fraud_scores)
+- Fraud signal field from analytics API is `signal_name` (not `signal` or `signal_type`)
+- Vercel deploy must be run from repo root with `.vercel/project.json` present — not from `frontend/` directory
+
+## Shopify Extension Setup (Pending)
+The `shopify-extension/` directory is ready but needs:
+1. Create Shopify Partner account at partners.shopify.com
+2. Create new app → get Client ID + Secret
+3. Set Redirect URI to `https://cod-fraud-saas-production.up.railway.app/api/v1/shopify/callback`
+4. Add `SHOPIFY_CLIENT_ID` and `SHOPIFY_CLIENT_SECRET` to Railway backend env vars
+5. Run `npm run dev` in `shopify-extension/` with Shopify CLI to test on dev store
