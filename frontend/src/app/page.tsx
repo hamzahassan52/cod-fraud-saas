@@ -49,9 +49,9 @@ function FinancialCard({
     )}>
       <div className="flex items-start justify-between">
         <div className="min-w-0 flex-1">
-          <p className="text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-slate-300">{label}</p>
+          <p className="text-base font-semibold text-gray-900 dark:text-slate-100">{label}</p>
           {badge && (
-            <span className="mt-0.5 inline-block rounded-full bg-indigo-100 dark:bg-indigo-900/30 px-2 py-0.5 text-xs font-medium text-indigo-700 dark:text-indigo-400">
+            <span className="mt-1 inline-block rounded-full bg-indigo-100 dark:bg-indigo-900/30 px-2 py-0.5 text-xs font-medium text-indigo-700 dark:text-indigo-400">
               {badge}
             </span>
           )}
@@ -92,15 +92,15 @@ function AIMetricCard({ label, value, subtitle, status = 'neutral' }: {
   label: string; value: string; subtitle?: string; status?: 'healthy' | 'warning' | 'neutral';
 }) {
   return (
-    <div className="rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-5 py-5">
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-slate-300">{label}</p>
+    <div className="rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-6">
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-base font-semibold text-gray-900 dark:text-slate-100">{label}</p>
         {status !== 'neutral' && (
-          <span className={clsx('h-2 w-2 rounded-full', status === 'healthy' ? 'bg-emerald-500' : 'bg-amber-500')} />
+          <span className={clsx('h-2.5 w-2.5 rounded-full flex-shrink-0', status === 'healthy' ? 'bg-emerald-500' : 'bg-amber-500')} />
         )}
       </div>
-      <p className="text-2xl font-bold text-gray-900 dark:text-slate-100">{value}</p>
-      {subtitle && <p className="mt-0.5 text-xs text-gray-500 dark:text-slate-400 truncate">{subtitle}</p>}
+      <p className="text-3xl font-bold text-gray-900 dark:text-slate-100">{value}</p>
+      {subtitle && <p className="mt-1 text-sm text-gray-500 dark:text-slate-400 truncate">{subtitle}</p>}
     </div>
   );
 }
@@ -249,7 +249,7 @@ export default function Dashboard() {
 
         {/* Layer 1: Financial Impact */}
         <section>
-          <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-slate-300">Financial Impact</p>
+          <p className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">Financial Impact</p>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <FinancialCard
               label="Capital Protected"
@@ -285,10 +285,10 @@ export default function Dashboard() {
 
         {/* Layer 2: Risk Overview */}
         <section>
-          <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-slate-300">Risk Overview</p>
+          <p className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">Risk Overview</p>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-xl border border-gray-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-800">
-              <p className="text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-slate-300">Total Orders</p>
+              <p className="text-base font-semibold text-gray-900 dark:text-slate-100">Total Orders</p>
               <p className="mt-2 text-3xl font-bold text-gray-900 dark:text-slate-100">{summary.totalOrders.toLocaleString()}</p>
               {priorData && (
                 <p className="mt-1 text-xs text-gray-500 dark:text-slate-400">Prior period: {(priorData.summary.totalOrders - summary.totalOrders).toLocaleString()}</p>
@@ -296,7 +296,7 @@ export default function Dashboard() {
             </div>
 
             <div className="rounded-xl border border-red-100 bg-red-50 p-6 dark:border-red-900/40 dark:bg-red-900/10">
-              <p className="text-xs font-semibold uppercase tracking-widest text-red-500 dark:text-red-400">Blocked — Revenue Saved</p>
+              <p className="text-base font-semibold text-red-700 dark:text-red-300">Blocked — Revenue Saved</p>
               <p className="mt-2 text-3xl font-bold text-red-700 dark:text-red-300">{summary.blocked.toLocaleString()}</p>
               <p className="mt-1 text-xs text-red-500 dark:text-red-400">
                 {summary.totalOrders > 0 ? Math.round(summary.blocked / summary.totalOrders * 100) : 0}% block rate
@@ -304,7 +304,7 @@ export default function Dashboard() {
             </div>
 
             <div className="rounded-xl border border-amber-100 bg-amber-50 p-6 dark:border-amber-900/40 dark:bg-amber-900/10">
-              <p className="text-xs font-semibold uppercase tracking-widest text-amber-600 dark:text-amber-400">Under Review</p>
+              <p className="text-base font-semibold text-amber-700 dark:text-amber-300">Under Review</p>
               <p className="mt-2 text-3xl font-bold text-amber-700 dark:text-amber-300">{summary.verify.toLocaleString()}</p>
               <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">Awaiting manual decision</p>
             </div>
@@ -317,7 +317,7 @@ export default function Dashboard() {
                 ? 'border-amber-100 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-900/10'
                 : 'border-emerald-100 bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-900/10'
             )}>
-              <p className="text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-slate-300">Return-to-Origin Rate</p>
+              <p className="text-base font-semibold text-gray-900 dark:text-slate-100">Return-to-Origin Rate</p>
               <p className={clsx(
                 'mt-2 text-3xl font-bold',
                 summary.rtoRate > 20 ? 'text-red-700 dark:text-red-300' :
@@ -362,7 +362,7 @@ export default function Dashboard() {
 
         {/* Layer 3: Trends */}
         <section>
-          <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-slate-300">Trends</p>
+          <p className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">Trends</p>
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
             <div className="lg:col-span-2">
               <Card title="Capital Protected — Daily Trend">
@@ -372,7 +372,7 @@ export default function Dashboard() {
             <Card title="RTO Rate Comparison">
               <div className="space-y-5 py-2">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-slate-300">Current {days === 1 ? '24h' : `${days}d`}</p>
+                  <p className="text-sm font-semibold text-gray-600 dark:text-slate-300">Current {days === 1 ? '24h' : `${days}d`}</p>
                   <div className="flex items-end gap-2 mt-1">
                     <p className={clsx(
                       'text-4xl font-bold',
@@ -391,7 +391,7 @@ export default function Dashboard() {
                 </div>
                 {priorRtoRate != null && (
                   <div className="border-t border-gray-100 dark:border-slate-700 pt-4">
-                    <p className="text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-slate-300">Prior {days === 1 ? '24h' : `${days}d`}</p>
+                    <p className="text-sm font-semibold text-gray-600 dark:text-slate-300">Prior {days === 1 ? '24h' : `${days}d`}</p>
                     <p className="mt-1 text-2xl font-semibold text-gray-500 dark:text-slate-400">{priorRtoRate}%</p>
                   </div>
                 )}
@@ -414,7 +414,7 @@ export default function Dashboard() {
 
         {/* Layer 4: Risk & Intelligence */}
         <section>
-          <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-slate-300">Risk & Intelligence</p>
+          <p className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">Risk & Intelligence</p>
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <Card title="Risk Distribution">
               {riskChartData.length === 0 ? (
@@ -433,7 +433,7 @@ export default function Dashboard() {
 
         {/* Layer 5: Operational Action */}
         <section>
-          <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-slate-300">Operational Action</p>
+          <p className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">Operational Action</p>
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <Card title="Orders Requiring Action" subtitle="Highest risk, awaiting review">
               {urgentOrders.length === 0 ? (
@@ -552,7 +552,7 @@ export default function Dashboard() {
 
         {/* Layer 6: AI Engine Status */}
         <section>
-          <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-slate-300">AI Engine Status</p>
+          <p className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">AI Engine Status</p>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
             <AIMetricCard
               label="Model Accuracy"
@@ -587,38 +587,38 @@ export default function Dashboard() {
           </div>
 
           <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <div className="rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-5 py-4">
-              <p className="text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-slate-300">Repeat Offender Orders</p>
-              <p className="mt-1 text-xl font-bold text-gray-900 dark:text-slate-100">
+            <div className="rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-6">
+              <p className="text-base font-semibold text-gray-900 dark:text-slate-100">Repeat Offender Orders</p>
+              <p className="mt-2 text-3xl font-bold text-gray-900 dark:text-slate-100">
                 {perfData?.repeatOffenderOrders != null ? perfData.repeatOffenderOrders : '—'}
               </p>
-              <p className="text-xs text-gray-500 dark:text-slate-400">Orders from phones with prior RTO history</p>
+              <p className="mt-1 text-sm text-gray-500 dark:text-slate-400">Orders from phones with prior RTO history</p>
             </div>
 
-            <div className="rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-5 py-4">
-              <p className="text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-slate-300">Manual Override Rate</p>
-              <p className="mt-1 text-xl font-bold text-gray-900 dark:text-slate-100">
+            <div className="rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-6">
+              <p className="text-base font-semibold text-gray-900 dark:text-slate-100">Manual Override Rate</p>
+              <p className="mt-2 text-3xl font-bold text-gray-900 dark:text-slate-100">
                 {perfData?.overrideRate != null ? `${perfData.overrideRate}%` : '—'}
               </p>
-              <p className="text-xs text-gray-500 dark:text-slate-400">Human corrections to AI decisions</p>
+              <p className="mt-1 text-sm text-gray-500 dark:text-slate-400">Human corrections to AI decisions</p>
             </div>
 
             <div className={clsx(
-              'rounded-xl border px-5 py-4',
+              'rounded-xl border p-6',
               perfData?.fraudVelocityIndex != null && perfData.fraudVelocityIndex > 2
                 ? 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/10'
                 : 'border-gray-200 bg-white dark:border-slate-700 dark:bg-slate-800'
             )}>
               <p className={clsx(
-                'text-xs font-semibold uppercase tracking-widest',
+                'text-base font-semibold',
                 perfData?.fraudVelocityIndex != null && perfData.fraudVelocityIndex > 2
-                  ? 'text-red-500 dark:text-red-400'
-                  : 'text-gray-500 dark:text-slate-300'
+                  ? 'text-red-700 dark:text-red-300'
+                  : 'text-gray-900 dark:text-slate-100'
               )}>
                 Fraud Velocity Index
               </p>
               <p className={clsx(
-                'mt-1 text-xl font-bold',
+                'mt-2 text-3xl font-bold',
                 perfData?.fraudVelocityIndex != null && perfData.fraudVelocityIndex > 2
                   ? 'text-red-700 dark:text-red-300'
                   : 'text-gray-900 dark:text-slate-100'
@@ -626,9 +626,9 @@ export default function Dashboard() {
                 {perfData?.fraudVelocityIndex != null ? `${perfData.fraudVelocityIndex}×` : '—'}
               </p>
               <p className={clsx(
-                'text-xs',
+                'mt-1 text-sm',
                 perfData?.fraudVelocityIndex != null && perfData.fraudVelocityIndex > 2
-                  ? 'text-red-500 dark:text-red-400'
+                  ? 'text-red-600 dark:text-red-400'
                   : 'text-gray-500 dark:text-slate-400'
               )}>
                 {perfData?.fraudVelocityIndex != null && perfData.fraudVelocityIndex > 2
