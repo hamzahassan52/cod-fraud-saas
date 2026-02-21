@@ -47,3 +47,10 @@ coverage/
 
 # OS files
 Thumbs.db
+
+# Vercel (keep project.json tracked)
+.vercel/*
+!.vercel/project.json
+
+# CatBoost training artifacts
+ml-service/catboost_info/
