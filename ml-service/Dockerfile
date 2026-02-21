@@ -1,12 +1,16 @@
 # ============================================
-# ML Service Dockerfile
+# ML Service Dockerfile — Inference Only
 # ============================================
+# Training is NOT done here.
+# Run scripts/train_offline.py locally to generate the model,
+# then commit models/latest.joblib + models/latest_meta.json to git.
+# This image just loads the pre-trained model and serves inference.
 
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# System deps
+# System deps (libgomp1 required by LightGBM/XGBoost)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     && rm -rf /var/lib/apt/lists/*
@@ -15,23 +19,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# App code
+# App code + pre-trained model (committed to repo by developer)
 COPY . .
 
-# Create model directory and make startup script executable
-RUN mkdir -p /app/versions /app/data && chmod +x /app/startup.sh
-
-# Train initial model during build (so container starts fast)
-RUN python scripts/generate_synthetic_data.py --n 20000 --no-train && python train.py --csv data/training_data.csv
+# Create necessary directories
+RUN mkdir -p /app/versions /app/data /app/models && chmod +x /app/startup.sh
 
 # Non-root user
 RUN useradd -m appuser && chown -R appuser:appuser /app
 USER appuser
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
   CMD python -c "import httpx; r = httpx.get('http://localhost:${PORT:-8000}/health'); assert r.status_code == 200"
 
 EXPOSE ${PORT:-8000}
 
-# Railway sets PORT env var; fallback to 8000
-CMD uvicorn app:app --host 0.0.0.0 --port ${PORT:-8000} --workers 2
+# startup.sh: loads pre-trained model (instant) or trains once if missing (first deploy)
+CMD ["/app/startup.sh"]

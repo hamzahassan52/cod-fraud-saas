@@ -35,6 +35,7 @@ class ModelArtifact:
     metrics: Dict[str, float] = field(default_factory=dict)
     trained_at: str = ""
     training_samples: int = 0
+    optimal_threshold: float = 0.5  # saved by train_offline.py; used by predict layer
 
 
 class ModelManager:
@@ -63,11 +64,42 @@ class ModelManager:
         """Load a model from disk and set it as the active model.
 
         If *version* is ``None`` the latest available version is loaded.
+        Falls back to ``models/latest.joblib`` if no versioned models exist.
         """
         if version is None:
             version = self.get_latest_version()
             if version is None:
-                raise FileNotFoundError("No model versions found in %s" % self.versions_dir)
+                # Fallback: try the pre-built model in models/latest.joblib
+                latest_path = _BASE_DIR / "models" / "latest.joblib"
+                latest_meta = _BASE_DIR / "models" / "latest_meta.json"
+                if latest_path.exists():
+                    logger.info("No versioned models found; loading from models/latest.joblib")
+                    model = joblib.load(latest_path)
+                    metrics, feature_names, trained_at, training_samples, optimal_threshold = {}, [], "", 0, 0.5
+                    if latest_meta.exists():
+                        with open(latest_meta, "r") as fh:
+                            meta = json.load(fh)
+                        metrics = meta.get("metrics", {})
+                        feature_names = meta.get("feature_names", [])
+                        trained_at = meta.get("trained_at", "")
+                        training_samples = meta.get("training_samples", 0)
+                        optimal_threshold = float(
+                            meta.get("optimal_threshold")
+                            or metrics.get("optimal_threshold", 0.5)
+                        )
+                    artifact = ModelArtifact(
+                        model=model, version=meta.get("version", "v_prebuilt"),
+                        feature_names=feature_names, metrics=metrics,
+                        trained_at=trained_at, training_samples=training_samples,
+                        optimal_threshold=optimal_threshold,
+                    )
+                    self._active = artifact
+                    logger.info("Pre-built model loaded (features=%d)", len(feature_names))
+                    return artifact
+                raise FileNotFoundError(
+                    "No model versions found in %s and no models/latest.joblib present. "
+                    "Run: python scripts/train_offline.py" % self.versions_dir
+                )
 
         model_path = self._model_path(version)
         meta_path = self._meta_path(version)
@@ -91,8 +123,14 @@ class ModelManager:
             feature_names = meta.get("feature_names", [])
             trained_at = meta.get("trained_at", "")
             training_samples = meta.get("training_samples", 0)
+            # optimal_threshold saved by train_offline.py — defaults to 0.5 for older models
+            optimal_threshold = float(
+                meta.get("optimal_threshold")
+                or metrics.get("optimal_threshold", 0.5)
+            )
         else:
             logger.warning("Metadata file missing for version %s", version)
+            optimal_threshold = 0.5
 
         artifact = ModelArtifact(
             model=model,
@@ -101,6 +139,7 @@ class ModelManager:
             metrics=metrics,
             trained_at=trained_at,
             training_samples=training_samples,
+            optimal_threshold=optimal_threshold,
         )
         self._active = artifact
         logger.info(

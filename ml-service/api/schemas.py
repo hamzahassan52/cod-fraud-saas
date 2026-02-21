@@ -64,6 +64,10 @@ class PredictionResponse(BaseModel):
         default_factory=list,
         description="Top SHAP-based feature explanations ranked by impact",
     )
+    optimal_threshold: Optional[float] = Field(
+        default=None,
+        description="Model's calibrated optimal decision threshold (replaces default 0.5)",
+    )
 
 
 # ---------------------------------------------------------------------------

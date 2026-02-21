@@ -60,8 +60,9 @@ def predict(
         raw = float(artifact.model.predict(X)[0])
         rto_prob = max(0.0, min(1.0, raw))
 
-    # --- 3. Confidence --------------------------------------------------
-    confidence = _calculate_confidence(rto_prob)
+    # --- 3. Confidence (relative to model's optimal threshold) ----------
+    threshold = getattr(artifact, "optimal_threshold", 0.5)
+    confidence = _calculate_confidence(rto_prob, threshold)
 
     # --- 4. SHAP explanations ------------------------------------------
     top_factors = _compute_shap_factors(artifact, X, ordered_values, features)
@@ -74,6 +75,7 @@ def predict(
         "model_version": artifact.version,
         "prediction_time_ms": round(elapsed_ms, 3),
         "top_factors": top_factors,
+        "optimal_threshold": round(threshold, 4),
     }
 
     logger.debug(
@@ -127,16 +129,17 @@ def _align_features(
     return values
 
 
-def _calculate_confidence(probability: float) -> float:
+def _calculate_confidence(probability: float, threshold: float = 0.5) -> float:
     """Derive a [0, 1] confidence score from the predicted probability.
 
-    Confidence is defined as how far the probability is from the decision
-    boundary of 0.5 -- scaled to [0, 1].
+    Confidence is how far the probability is from the model's optimal decision
+    threshold (not necessarily 0.5), scaled to [0, 1].
 
-    * probability = 0.5  ->  confidence = 0.0  (maximally uncertain)
-    * probability = 0.0 or 1.0  ->  confidence = 1.0  (maximally certain)
+    * probability == threshold  ->  0.0  (maximally uncertain)
+    * probability == 0.0 or 1.0 ->  1.0  (maximally certain)
     """
-    return abs(probability - 0.5) * 2.0
+    max_distance = max(threshold, 1.0 - threshold)
+    return abs(probability - threshold) / max_distance
 
 
 def _compute_shap_factors(

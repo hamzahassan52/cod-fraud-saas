@@ -166,16 +166,18 @@ async def predict_endpoint(body: PredictionRequest):
     return PredictionResponse(**result)
 
 
-@app.get("/health", response_model=HealthResponse)
+@app.get("/health")
 async def health():
     """Shallow health check."""
     artifact = model_manager.active_model
-    return HealthResponse(
-        status="healthy",
-        model_loaded=artifact is not None,
-        model_version=artifact.version if artifact else None,
-        timestamp=datetime.now(timezone.utc).isoformat(),
-    )
+    return {
+        "status": "healthy",
+        "model_loaded": artifact is not None,
+        "model_version": artifact.version if artifact else None,
+        "feature_count": len(artifact.feature_names) if artifact else 0,
+        "optimal_threshold": getattr(artifact, "optimal_threshold", 0.5) if artifact else None,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 @app.get("/model/info", response_model=ModelInfo)
@@ -248,13 +250,15 @@ async def train_endpoint(body: TrainingRequest | None = None):
         # Reload newly trained model as active
         model_manager.load_model(version=version)
 
-        # Feature importances
-        importances = dict(
-            zip(
-                feature_names,
-                [round(float(v), 4) for v in model.feature_importances_],
-            )
-        )
+        # Feature importances (ensemble-safe)
+        try:
+            xgb_imp  = model.estimators_[0].feature_importances_
+            lgbm_imp = model.estimators_[1].feature_importances_
+            avg_imp  = (xgb_imp + lgbm_imp) / 2.0
+            importances = dict(zip(feature_names, [round(float(v), 4) for v in avg_imp]))
+        except (AttributeError, IndexError):
+            imp_arr = getattr(model, "feature_importances_", [0.0] * len(feature_names))
+            importances = dict(zip(feature_names, [round(float(v), 4) for v in imp_arr]))
 
         return TrainingResponse(
             version=version,

@@ -1,11 +1,18 @@
 """
 Single source of truth for feature names between the Node.js backend and the ML model.
 
-The backend (FeatureExtractor) produces features with one naming convention,
-and the ML model expects a specific set of feature names.
+Feature Architecture (v3 — 48 features):
+-----------------------------------------
+Group A — Static Order Features      (always available from order payload)
+Group B — Behavioral/Velocity        (from customer history in DB)
+Group C — Contextual/Seasonal        (computed from date, city, product)
+Group D — Derived Interaction        (computed from A+B+C)
 
-This module defines the canonical mapping so both sides stay in sync.
-v3: 48 features (was 42) — added seasonal, discount, velocity-1h, behavioral patterns.
+REQUIRED_FEATURES  — bare minimum; inference is refused without these
+OPTIONAL_FEATURES  — filled from DEFAULT_VALUES if missing; inference still works
+DEFAULT_VALUES     — sensible Pakistan COD defaults for every optional feature
+
+This ensures real-world orders with partial data still score correctly.
 """
 
 from __future__ import annotations
@@ -71,6 +78,88 @@ FEATURE_NAMES: List[str] = sorted([
     "is_high_discount",          # discount > 40% (combined with COD = abuse signal)
     "avg_days_between_orders",   # avg days between consecutive orders (< 1 = rapid ring)
 ])
+
+# ---------------------------------------------------------------------------
+# Feature categorization — 4 groups
+# ---------------------------------------------------------------------------
+FEATURE_GROUPS: Dict[str, List[str]] = {
+    # A — Static Order Features: always computable from the order payload itself
+    "A_static_order": [
+        "order_amount",
+        "order_item_count",
+        "is_cod",
+        "is_prepaid",
+        "order_hour",
+        "is_weekend",
+        "is_night_order",
+        "is_high_value_order",
+        "discount_percentage",
+        "is_high_discount",
+        "amount_zscore",        # approximated; defaults to 0 if pop stats unavailable
+    ],
+    # B — Behavioral/Velocity Features: require customer history lookup from DB
+    "B_behavioral_velocity": [
+        "customer_order_count",
+        "customer_rto_rate",
+        "customer_cancel_rate",
+        "customer_avg_order_value",
+        "customer_lifetime_value",
+        "customer_account_age_days",
+        "customer_distinct_cities",
+        "customer_distinct_phones",
+        "customer_address_changes",
+        "days_since_last_order",
+        "orders_last_1h",
+        "orders_last_24h",
+        "orders_last_7d",
+        "avg_days_between_orders",
+        "is_first_order",
+        "is_repeat_customer",
+        "is_new_account",
+        "new_account_cod",
+        "new_account_high_value",
+        "phone_verified",
+        "email_verified",
+        "address_quality_score",
+    ],
+    # C — Contextual/Seasonal Features: city stats, product signals, date-based flags
+    "C_contextual_seasonal": [
+        "city_rto_rate",
+        "city_order_volume",
+        "city_avg_delivery_days",
+        "product_rto_rate",
+        "product_category_rto_rate",
+        "product_price_vs_avg",
+        "shipping_distance_km",
+        "same_city_shipping",
+        "is_eid_period",
+        "is_ramadan",
+        "is_sale_period",
+    ],
+    # D — Derived Interaction Features: computed from the groups above
+    "D_derived_interaction": [
+        "cod_first_order",
+        "high_value_cod_first",
+        "phone_risk_score",
+        "amount_vs_customer_avg",
+    ],
+}
+
+# ---------------------------------------------------------------------------
+# Required vs Optional features
+# ---------------------------------------------------------------------------
+
+# REQUIRED: absolute minimum for a meaningful prediction.
+# Inference is refused if these are missing AND cannot be defaulted.
+REQUIRED_FEATURES: List[str] = [
+    "order_amount",   # can't score an order without its value
+    "is_cod",         # single strongest fraud signal
+    "order_hour",     # time context
+]
+
+# OPTIONAL: can be missing; filled from DEFAULT_VALUES below.
+# Real-world orders with partial data will still score correctly.
+OPTIONAL_FEATURES: List[str] = [f for f in FEATURE_NAMES if f not in REQUIRED_FEATURES]
 
 # ---------------------------------------------------------------------------
 # Mapping from backend field names to ML feature names.
