@@ -81,10 +81,28 @@ logger = logging.getLogger("train_offline")
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-MIN_REAL_ORDERS = 3_000      # Minimum labeled real orders before switching to real data
-MIN_AUC_DROP    = 0.05       # Only retrain if AUC drops more than 5% on real holdout
-MODELS_DIR      = PROJECT_ROOT / "models"
+MIN_REAL_ORDERS  = 3_000     # Minimum labeled real orders before switching to real data
+MIN_AUC_DROP     = 0.05      # Only retrain if AUC drops more than 5% on real holdout
+MODELS_DIR       = PROJECT_ROOT / "models"
+KEEP_VERSIONS    = 3         # Default: keep only last N versioned models to save disk space
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def cleanup_old_versions(keep: int = KEEP_VERSIONS) -> None:
+    """Delete old versioned models from versions/, keeping only the latest `keep` versions."""
+    manager = ModelManager()
+    all_versions = manager.list_versions()
+    if len(all_versions) <= keep:
+        return
+    to_delete = all_versions[keep:]
+    for version in to_delete:
+        model_file = manager.versions_dir / f"model_{version}.joblib"
+        meta_file  = manager.versions_dir / f"model_{version}_meta.json"
+        for f in [model_file, meta_file]:
+            if f.exists():
+                f.unlink()
+                logger.info("Deleted old version file: %s", f.name)
+    logger.info("Cleanup done: kept %d latest versions, deleted %d old versions", keep, len(to_delete))
 
 
 # ===========================================================================
@@ -401,6 +419,7 @@ def run_training(
     n_synthetic: int = 30_000,
     calibrate: bool = True,
     target_recall: float = 0.80,
+    keep_versions: int = KEEP_VERSIONS,
 ) -> Dict[str, Any]:
     """
     Full offline training pipeline. Steps:
@@ -640,6 +659,9 @@ def run_training(
     logger.info("  Versioned : versions/model_%s.joblib", version)
     logger.info("  Latest    : models/latest.joblib  ← commit this to git")
 
+    # Auto-cleanup old versions to save disk space
+    cleanup_old_versions(keep=keep_versions)
+
     # ── Real data transition guidance ──────────────────────────────────
     if not real_readiness["ready"]:
         still_needed = MIN_REAL_ORDERS - real_readiness["count"]
@@ -713,6 +735,10 @@ After training:
         "--check-real-data", action="store_true",
         help="Only check real data readiness, do not train",
     )
+    parser.add_argument(
+        "--keep-versions", type=int, default=KEEP_VERSIONS,
+        help=f"Keep only last N versioned models in versions/ to save disk space (default: {KEEP_VERSIONS}, use 0 to delete all old versions)",
+    )
     args = parser.parse_args()
 
     if args.check_real_data:
@@ -725,6 +751,7 @@ After training:
         n_synthetic=args.samples,
         calibrate=not args.no_calibrate,
         target_recall=args.target_recall,
+        keep_versions=args.keep_versions,
     )
 
     print("\n" + "=" * 60)
