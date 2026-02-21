@@ -10,8 +10,8 @@ Can be executed standalone::
 The script will:
   1. Fetch / load labelled order data (48 features).
   2. Engineer interaction + v3 features.
-  3. Apply SMOTE to balance RTO vs delivered classes.
-  4. Train XGBoost + LightGBM with hyperparameter search (5-fold CV).
+  3. Train XGBoost + LightGBM with hyperparameter search (3-fold CV, 15+10 iter).
+  4. Class imbalance handled via scale_pos_weight/class_weight (no SMOTE overhead).
   5. Combine into a soft-voting ensemble for improved accuracy.
   6. Evaluate on held-out test set.
   7. Save the ensemble + metadata under ``versions/``.
@@ -31,7 +31,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
-from imblearn.over_sampling import SMOTE
 from lightgbm import LGBMClassifier
 from sklearn.ensemble import VotingClassifier
 from sklearn.metrics import (
@@ -332,80 +331,73 @@ def train_model(
         )
     logger.info("Train: %d | Test: %d", len(X_train), len(X_test))
 
-    # --- SMOTE: oversample minority class to balance train set ----------
-    logger.info(
-        "Applying SMOTE (before: %d pos=RTO, %d neg=delivered) ...",
-        n_positive, n_negative,
-    )
-    k_neighbors = min(5, max(1, n_positive - 1))
-    smote = SMOTE(random_state=42, k_neighbors=k_neighbors)
-    X_train_sm, y_train_sm = smote.fit_resample(X_train, y_train)
-    n_pos_sm = int(y_train_sm.sum())
-    logger.info(
-        "After SMOTE: %d samples (%d pos, %d neg)",
-        len(X_train_sm), n_pos_sm, len(X_train_sm) - n_pos_sm,
-    )
+    # Class imbalance ratio for XGBoost scale_pos_weight
+    pos_weight = n_negative / max(n_positive, 1)
+    logger.info("Class ratio (neg/pos) for scale_pos_weight: %.2f", pos_weight)
 
-    # --- XGBoost hyperparameter search ----------------------------------
+    # --- XGBoost hyperparameter search (15 iter, 3-fold) ----------------
     xgb_base = {
         "objective": "binary:logistic",
         "eval_metric": "logloss",
         "use_label_encoder": False,
+        "scale_pos_weight": pos_weight,
         "random_state": 42,
         "n_jobs": -1,
     }
     xgb_param_grid = {
-        "n_estimators": [100, 200, 300, 500],
-        "max_depth": [3, 4, 5, 6, 8],
+        "n_estimators": [100, 200, 300],
+        "max_depth": [3, 4, 5, 6],
         "learning_rate": [0.01, 0.05, 0.1],
         "subsample": [0.7, 0.8, 0.9],
         "colsample_bytree": [0.7, 0.8],
         "min_child_weight": [1, 3, 5],
         "gamma": [0, 0.1, 0.2],
-        "reg_alpha": [0, 0.01, 0.1],
-        "reg_lambda": [1, 1.5, 2],
+        "reg_alpha": [0, 0.1],
+        "reg_lambda": [1, 1.5],
     }
-    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-    logger.info("XGBoost: RandomizedSearchCV 30 iterations, 5-fold CV ...")
+    cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
+    logger.info("XGBoost: RandomizedSearchCV 15 iterations, 3-fold CV ...")
     xgb_search = RandomizedSearchCV(
         estimator=XGBClassifier(**xgb_base),
         param_distributions=xgb_param_grid,
-        n_iter=30,
+        n_iter=15,
         cv=cv,
         scoring="roc_auc",
         n_jobs=-1,
         verbose=0,
         random_state=42,
     )
-    xgb_search.fit(X_train_sm, y_train_sm)
+    xgb_search.fit(X_train, y_train)
     logger.info(
         "XGBoost best CV AUC-ROC: %.4f | params: %s",
         xgb_search.best_score_, xgb_search.best_params_,
     )
 
-    # --- LightGBM hyperparameter search ---------------------------------
+    # --- LightGBM hyperparameter search (10 iter, 3-fold) ---------------
     lgbm_param_grid = {
-        "n_estimators": [100, 200, 300, 500],
-        "num_leaves": [31, 50, 70, 100],
+        "n_estimators": [100, 200, 300],
+        "num_leaves": [31, 50, 70],
         "learning_rate": [0.01, 0.05, 0.1],
         "subsample": [0.7, 0.8, 0.9],
         "colsample_bytree": [0.7, 0.8],
         "min_child_samples": [10, 20, 30],
-        "reg_alpha": [0, 0.01, 0.1],
-        "reg_lambda": [1, 1.5, 2],
+        "reg_alpha": [0, 0.1],
+        "reg_lambda": [1, 1.5],
     }
-    logger.info("LightGBM: RandomizedSearchCV 25 iterations, 5-fold CV ...")
+    logger.info("LightGBM: RandomizedSearchCV 10 iterations, 3-fold CV ...")
     lgbm_search = RandomizedSearchCV(
-        estimator=LGBMClassifier(random_state=42, verbose=-1, n_jobs=-1),
+        estimator=LGBMClassifier(
+            random_state=42, verbose=-1, n_jobs=-1, class_weight="balanced"
+        ),
         param_distributions=lgbm_param_grid,
-        n_iter=25,
+        n_iter=10,
         cv=cv,
         scoring="roc_auc",
         n_jobs=-1,
         verbose=0,
         random_state=42,
     )
-    lgbm_search.fit(X_train_sm, y_train_sm)
+    lgbm_search.fit(X_train, y_train)
     logger.info(
         "LightGBM best CV AUC-ROC: %.4f | params: %s",
         lgbm_search.best_score_, lgbm_search.best_params_,
@@ -415,15 +407,19 @@ def train_model(
     logger.info("Building soft-voting ensemble (XGBoost + LightGBM) ...")
     best_xgb = XGBClassifier(**{**xgb_base, **xgb_search.best_params_})
     best_lgbm = LGBMClassifier(
-        **{"random_state": 42, "verbose": -1, "n_jobs": -1, **lgbm_search.best_params_}
+        **{
+            "random_state": 42, "verbose": -1,
+            "n_jobs": -1, "class_weight": "balanced",
+            **lgbm_search.best_params_,
+        }
     )
     best_model = VotingClassifier(
         estimators=[("xgb", best_xgb), ("lgbm", best_lgbm)],
         voting="soft",
         n_jobs=1,
     )
-    best_model.fit(X_train_sm, y_train_sm)
-    logger.info("Ensemble fitted on %d SMOTE'd samples.", len(X_train_sm))
+    best_model.fit(X_train, y_train)
+    logger.info("Ensemble fitted on %d training samples.", len(X_train))
 
     # --- Evaluation on original held-out test set -----------------------
     y_pred = best_model.predict(X_test)
