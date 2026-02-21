@@ -223,25 +223,30 @@ export function Sidebar({ open, onClose, collapsed, onCollapsedChange }: Sidebar
 
         {/* User footer */}
         <div className={clsx(
-          'border-t border-gray-800 flex-shrink-0',
+          'border-t border-gray-800/80 flex-shrink-0',
           showFull ? 'px-3 py-3' : 'px-2 py-3'
         )}>
           <div className={clsx('flex items-center', showFull ? 'gap-3' : 'justify-center')}>
-            <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-700 text-xs font-semibold text-white ring-2 ring-blue-500/30">
-              {user?.name?.charAt(0)?.toUpperCase() || 'U'}
+            {/* Avatar */}
+            <div className="relative flex-shrink-0">
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-blue-400 via-blue-500 to-indigo-600 text-sm font-bold text-white shadow-lg ring-2 ring-blue-500/20">
+                {user?.name?.charAt(0)?.toUpperCase() || 'U'}
+              </div>
+              <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-gray-900" />
             </div>
+
             {showFull && (
               <>
                 <div className="min-w-0 flex-1 overflow-hidden">
-                  <p className="truncate text-sm font-medium text-white">{user?.name || 'User'}</p>
+                  <p className="truncate text-sm font-semibold text-white">{user?.name || 'User'}</p>
                   <p className="truncate text-xs text-gray-500">{user?.email || ''}</p>
                 </div>
                 <button
                   onClick={logout}
                   title="Sign out"
-                  className="flex-shrink-0 flex items-center gap-1.5 rounded-lg border border-gray-700/60 bg-gray-800/60 px-2.5 py-1.5 text-xs font-medium text-gray-400 transition-all hover:border-red-800/60 hover:bg-red-900/30 hover:text-red-400 active:scale-95"
+                  className="group flex-shrink-0 flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-medium text-gray-500 transition-all duration-150 hover:bg-red-500/10 hover:text-red-400 active:scale-95"
                 >
-                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <svg className="h-4 w-4 transition-transform duration-150 group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
                   </svg>
                   Sign out
@@ -252,9 +257,9 @@ export function Sidebar({ open, onClose, collapsed, onCollapsedChange }: Sidebar
               <button
                 onClick={logout}
                 title="Sign out"
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 transition-all hover:bg-red-900/30 hover:text-red-400 active:scale-95"
+                className="group flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 transition-all duration-150 hover:bg-red-500/10 hover:text-red-400 active:scale-95"
               >
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <svg className="h-4 w-4 transition-transform duration-150 group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
                 </svg>
               </button>
