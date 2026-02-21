@@ -8,6 +8,7 @@ import { ScanToast, ScanToastData } from '@/components/ui/scan-toast';
 import { useGlobalScanner } from '@/hooks/use-global-scanner';
 import { useScanHistory } from '@/context/scan-history-context';
 import { scannerApi } from '@/lib/api';
+import { beepSuccess, beepError, beepWarning } from '@/lib/scanner-beep';
 import clsx from 'clsx';
 
 interface DashboardLayoutProps {
@@ -53,6 +54,10 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                    : data.result === 'already_processed' ? 'already_done'
                    : 'not_found';
 
+      if (status === 'returned') beepSuccess();
+      else if (status === 'already_done') beepWarning();
+      else beepError();
+
       setToasts(prev => prev.map(t => t.id !== id ? t : {
         id, trackingNumber, status,
         customerName: data.order?.customer_name,
@@ -70,6 +75,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         time: new Date().toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' }),
       });
     } catch {
+      beepError();
       setToasts(prev => prev.map(t => t.id !== id ? t : {
         id, trackingNumber, status: 'not_found',
       }));
