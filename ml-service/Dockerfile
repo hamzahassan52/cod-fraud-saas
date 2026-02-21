@@ -22,7 +22,7 @@ COPY . .
 RUN mkdir -p /app/versions /app/data && chmod +x /app/startup.sh
 
 # Train initial model during build (so container starts fast)
-RUN python scripts/generate_synthetic_data.py --n 20000 && python train.py --csv data/training_data.csv
+RUN python scripts/generate_synthetic_data.py --n 100000 && python train.py --csv data/training_data.csv
 
 # Non-root user
 RUN useradd -m appuser && chown -R appuser:appuser /app

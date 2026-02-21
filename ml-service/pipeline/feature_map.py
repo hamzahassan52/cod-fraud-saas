@@ -77,14 +77,17 @@ FEATURE_DEFAULTS: Dict[str, float] = {
     "customer_avg_order_value": 0.0,
     "customer_distinct_phones": 1.0,
     "customer_address_changes": 0.0,
-    "city_avg_delivery_days": 0.0,
-    "product_rto_rate": 0.0,
-    "product_category_rto_rate": 0.0,
+    # City defaults: Pakistan national averages (so unknown cities still score correctly)
+    "city_rto_rate": 0.28,           # Pakistan national average RTO
+    "city_order_volume": 400.0,      # medium-sized area
+    "city_avg_delivery_days": 3.5,   # average delivery time
+    "product_rto_rate": 0.25,
+    "product_category_rto_rate": 0.25,
     "product_price_vs_avg": 1.0,
     "amount_zscore": 0.0,
     "email_verified": 0.0,
     "address_quality_score": 0.5,
-    "shipping_distance_km": 0.0,
+    "shipping_distance_km": 200.0,   # assume moderate distance if unknown
     "same_city_shipping": 0.0,
     "discount_percentage": 0.0,
     "is_prepaid": 0.0,
