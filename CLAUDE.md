@@ -159,17 +159,24 @@ cod-fraud-saas/
 │   │   │   └── ui/
 │   │   │       ├── card.tsx               # Card component (title, subtitle, action)
 │   │   │       ├── modal.tsx              # Reusable modal (sm/md/lg, default/danger/warning)
+│   │   │       ├── scan-toast.tsx         # Floating barcode scan result toast (auto-dismiss 2.5s)
 │   │   │       ├── badge.tsx              # Badge component
 │   │   │       ├── stat-card.tsx          # KPI stat card
 │   │   │       ├── risk-badge.tsx         # Risk level badge
 │   │   │       ├── recommendation-badge.tsx
 │   │   │       ├── empty-state.tsx
 │   │   │       └── loading.tsx
-│   │   ├── context/       # ThemeProvider (next-themes), StoreContext
-│   │   ├── hooks/         # useAuth (JWT token management)
+│   │   ├── context/
+│   │   │   ├── ThemeProvider.tsx          # next-themes dark/light
+│   │   │   ├── StoreContext.tsx           # Store/tenant state
+│   │   │   └── scan-history-context.tsx   # Global scan history (shared between layout + scanner page)
+│   │   ├── hooks/
+│   │   │   ├── use-auth.ts                # JWT token management
+│   │   │   └── use-global-scanner.ts      # Detects physical barcode scanner input (rapid keystrokes < 50ms + Enter)
 │   │   └── lib/
-│   │       ├── api.ts     # Axios instance + all API functions
-│   │       └── utils.ts   # Utility functions
+│   │       ├── api.ts         # Axios instance + all API functions
+│   │       ├── scanner-beep.ts # Web Audio API beep sounds (success/error/warning) — no library
+│   │       └── utils.ts       # Utility functions
 │   └── .env.example
 ├── shopify-extension/     # Shopify Admin Extension (order risk badge)
 │   ├── README.md          # Partner account setup guide
@@ -299,7 +306,7 @@ cod-fraud-saas/
 2. **Orders** (`/orders`) — Filterable table (search, risk level, decision, status, sortBy). Override actions use professional modal. Risk summary truncates with info icon. Table wrapped in overflow-x-auto for mobile.
 3. **Analytics** (`/analytics`) — "Fraud Intelligence Lab". 4 sections: Performance Metrics (8 KPIs: 4 analytics + 4 ML), Trend Analysis (3 charts + 7/30/90d selector), Fraud Intelligence (signals + platform breakdown + cities table), Advanced (collapsible, 3 Coming Soon cards). Export CSV button.
 4. **Blacklist** (`/blacklist`) — CRUD table with type tabs (all/phone/email/ip/address/name). Add form. Reason column shows info icon for long reasons → opens modal.
-5. **Scanner** (`/scanner`) — Return scanner for warehouse staff. Enter/scan tracking number → marks order as returned, saves ML training event (label=1). Shows result card (green/yellow/red) + scan history (last 10 scans with timestamps). Auto-focuses input after each scan.
+5. **Scanner** (`/scanner`) — Return scanner status + history page. NO manual input field on the page itself — scanning happens globally from ANY page via `useGlobalScanner` hook in `DashboardLayout`. Physical USB/Bluetooth barcode scanner auto-submits when parcel scanned. Page shows: today's stats (scanned/returns/ML progress), "Manual Entry" collapsible section (fallback for damaged barcodes only), scan history list (tracking number, customer name, risk score, time, status). Audio beep feedback on every scan.
 6. **ML Insights** (`/ml`) — Model info, 5 performance metrics, confusion matrix (7d/30d/90d), top 10 feature importance bars, model versions table, service health, **Self-Learning Progress card** (progress bar showing unused outcomes vs 500 threshold, stats: total/delivered/returned/unused, last retrain info).
 7. **Settings** (`/settings`) — Account info, plan & usage bar, scoring threshold sliders (visual gradient bar), API key management, Platform Integrations (Shopify OAuth card + WooCommerce/Magento/Joomla/Custom webhook cards with copy URL + expandable instructions).
 8. **Billing** (`/billing`) — Full-width. Current plan as a large gradient card with usage bar and days remaining. Plans grid (`grid-cols-1 sm:grid-cols-2 xl:grid-cols-4`) with bigger cards, popular badge, current plan ring. Improved invoice history table with hover states.
@@ -308,6 +315,7 @@ cod-fraud-saas/
 ## UI Components
 - **Modal** (`components/ui/modal.tsx`) — Reusable: sizes (sm/md/lg), variants (default/danger/warning), ESC to close, backdrop click to close
 - **Card** (`components/ui/card.tsx`) — Has title, subtitle, action props
+- **ScanToast** (`components/ui/scan-toast.tsx`) — Floating toast for barcode scan results. Top-right corner, auto-dismisses after 2.5s. States: loading (spinner), returned (red), already_done (yellow), not_found (gray). Shows customer name + risk score on success.
 - All pages use full width (no max-w constraints)
 - **Fully responsive**: all pages work on mobile/tablet/desktop. Grids use `grid-cols-1 sm:grid-cols-2 xl:grid-cols-4` pattern. Headers stack on mobile (`flex-col sm:flex-row`). Sidebar slides in from left on mobile (hamburger in Topbar).
 
@@ -387,6 +395,29 @@ vercel --prod --yes   # run from repo root (not frontend dir)
 8. **Mobile first** — All frontend changes must be responsive (mobile/tablet/laptop/large screen)
 9. **Minimize comments** — Owner said no unnecessary comments or explanations in code, just code
 
+## Global Barcode Scanner Architecture
+Physical USB/Bluetooth barcode scanners work as **keyboard emulators** — OS treats them as keyboards. When a barcode is scanned, the device types the value + Enter into whatever is focused.
+
+**Implementation** (zero dependencies, no library):
+- `hooks/use-global-scanner.ts` — attaches `document.addEventListener('keydown', ...)` at layout level
+- Detects scanner pattern: characters arriving < 50ms apart = scanner input; > 100ms gap = human typing
+- Only fires when no `INPUT`/`TEXTAREA`/`SELECT` is focused (avoids intercepting manual form input)
+- Minimum 6 chars required to be treated as a valid tracking number
+- On Enter → calls `scannerApi.scan(trackingNumber)` → updates DB, creates training_event
+
+**Audio feedback** (`lib/scanner-beep.ts`) — Web Audio API oscillator, no npm package:
+- `beepSuccess()` — high-pitch short beep (return recorded ✓)
+- `beepWarning()` — medium beep (already processed ⚠)
+- `beepError()` — two low beeps (not found ✗)
+
+**Scan history** — `context/scan-history-context.tsx` React context (in-memory, session only):
+- `DashboardLayout` writes to context on every scan
+- `/scanner` page reads from context to display today's history
+
+**Manual fallback** on `/scanner` page — collapsible section for damaged barcodes. Calls same `scannerApi.scan()` endpoint.
+
+**Staff workflow**: Open any dashboard page → scanner auto-captures from anywhere → toast appears 2.5s → beeps → done. No `/scanner` page visit required.
+
 ## Self-Learning ML Feedback Loop
 The system collects real delivery outcomes to continuously improve the ML model:
 
@@ -429,7 +460,9 @@ The system collects real delivery outcomes to continuously improve the ML model:
 - **`/api/v1/ml/confusion-matrix` response**: flat fields `{true_positives, true_negatives, false_positives, false_negatives, total}` — not nested under `confusionMatrix` object
 - **Dispatch endpoint must NOT set `status`** — `POST /orders/:id/dispatch` only sets `tracking_number`, `final_status = 'dispatched'`, `dispatched_at`. Never change `status` (ML/verification decision) here — they are orthogonal fields
 - **`final_status` backfill** — `ALTER TABLE ADD COLUMN DEFAULT 'pending'` sets NULL for existing rows (no NOT NULL constraint). Migration includes `UPDATE orders SET final_status = 'pending' WHERE final_status IS NULL` to fix this
-- **Scanner page is dark-themed** — `/scanner` uses dark bg (`bg-gray-800`, `bg-gray-900`) matching the scanner-station aesthetic. This is intentional, not a bug
+- **Scanner does NOT need its own input field** — `useGlobalScanner` in `DashboardLayout` captures from any page. The `/scanner` page is for history + manual fallback only, not for primary scanning
+- **Do not add input auto-focus to scanner page** — focus should stay free so global scanner can always capture barcode input from any page
+- **Physical barcode scanner = keyboard emulator** — no library (ZXing, QuaggaJS, etc.) needed for hardware scanners. Libraries are only for camera-based scanning which is less reliable in warehouse settings
 
 ## Shopify Extension Setup (Pending)
 The `shopify-extension/` directory is ready but needs:
