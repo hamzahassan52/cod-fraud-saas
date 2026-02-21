@@ -16,18 +16,63 @@ export async function mlRoutes(app: FastifyInstance): Promise<void> {
   // GET /ml/metrics - Current model performance metrics
   app.get('/metrics', async (_request: FastifyRequest, reply: FastifyReply) => {
     const metrics = await cacheGetOrSet('ml:metrics', async () => {
-      // Get active model from DB
+      // Try DB first
       const modelResult = await query(
         `SELECT version, model_type, accuracy, precision_score, recall, f1_score, auc_roc,
                 training_samples, feature_count, feature_importance, trained_at, activated_at
          FROM model_versions WHERE is_active = true LIMIT 1`
       );
 
-      if (modelResult.rows.length === 0) {
-        return { active: false, message: 'No active model' };
-      }
+      let modelInfo: any = null;
+      let performance: any = null;
+      let featureImportance: Array<{ feature: string; importance: number }> = [];
 
-      const model = modelResult.rows[0];
+      if (modelResult.rows.length > 0) {
+        const model = modelResult.rows[0];
+        modelInfo = {
+          version: model.version,
+          model_type: model.model_type,
+          trained_at: model.trained_at,
+          training_samples: parseInt(model.training_samples) || null,
+          feature_count: parseInt(model.feature_count) || null,
+        };
+        performance = {
+          accuracy: parseFloat(model.accuracy) || null,
+          precision: parseFloat(model.precision_score) || null,
+          recall: parseFloat(model.recall) || null,
+          f1_score: parseFloat(model.f1_score) || null,
+          auc_roc: parseFloat(model.auc_roc) || null,
+        };
+        // Convert feature_importance object to sorted array
+        const fi = model.feature_importance || {};
+        const total = Object.values(fi).reduce((s: number, v) => s + Math.abs(parseFloat(v as string) || 0), 0);
+        featureImportance = Object.entries(fi)
+          .map(([feature, imp]) => ({ feature, importance: total > 0 ? parseFloat(imp as string) / total : 0 }))
+          .sort((a, b) => b.importance - a.importance)
+          .slice(0, 20);
+      } else {
+        // Fallback: pull model info from ML microservice
+        try {
+          const mlRes = await axios.get(`${config.ml.serviceUrl}/model/info`, { timeout: 5000 });
+          const info = mlRes.data;
+          modelInfo = {
+            version: info.version,
+            model_type: info.model_type || 'XGBoost Ensemble',
+            trained_at: info.trained_at || null,
+            training_samples: info.training_samples || null,
+            feature_count: info.feature_count || null,
+          };
+          performance = {
+            accuracy: info.accuracy || null,
+            precision: info.precision || null,
+            recall: info.recall || null,
+            f1_score: info.f1 || null,
+            auc_roc: info.auc_roc || null,
+          };
+        } catch {
+          return { active: false, message: 'No active model' };
+        }
+      }
 
       // Get scoring stats from last 7 days
       const statsResult = await query(
@@ -35,31 +80,16 @@ export async function mlRoutes(app: FastifyInstance): Promise<void> {
           COUNT(*) as total_scored,
           ROUND(AVG(final_score)::numeric, 2) as avg_score,
           ROUND(AVG(scoring_duration_ms)::numeric, 0) as avg_scoring_ms,
-          ROUND(AVG(ml_score)::numeric, 2) as avg_ml_score,
-          COUNT(*) FILTER (WHERE ml_model_version = $1) as using_current_model
-         FROM fraud_scores WHERE scored_at >= NOW() - INTERVAL '7 days'`,
-        [model.version]
+          ROUND(AVG(ml_score)::numeric, 2) as avg_ml_score
+         FROM fraud_scores WHERE scored_at >= NOW() - INTERVAL '7 days'`
       );
 
       return {
         active: true,
-        model: {
-          version: model.version,
-          type: model.model_type,
-          trainedAt: model.trained_at,
-          activatedAt: model.activated_at,
-          trainingSamples: model.training_samples,
-          featureCount: model.feature_count,
-        },
-        performance: {
-          accuracy: parseFloat(model.accuracy) || null,
-          precision: parseFloat(model.precision_score) || null,
-          recall: parseFloat(model.recall) || null,
-          f1Score: parseFloat(model.f1_score) || null,
-          aucRoc: parseFloat(model.auc_roc) || null,
-        },
-        featureImportance: model.feature_importance || {},
-        recentStats: statsResult.rows[0],
+        model_info: modelInfo,
+        performance,
+        feature_importance: featureImportance,
+        recent_stats: statsResult.rows[0],
       };
     }, 120);
 
@@ -116,17 +146,18 @@ export async function mlRoutes(app: FastifyInstance): Promise<void> {
     );
 
     return reply.send({
-      confusionMatrix: { truePositive: tp, trueNegative: tn, falsePositive: fp, falseNegative: fn },
-      metrics: {
-        accuracy: Math.round(accuracy * 10000) / 100,
-        precision: Math.round(precision * 10000) / 100,
-        recall: Math.round(recall * 10000) / 100,
-        f1Score: Math.round(f1 * 10000) / 100,
-      },
+      true_positives: tp,
+      true_negatives: tn,
+      false_positives: fp,
+      false_negatives: fn,
+      total: total,
+      accuracy: Math.round(accuracy * 10000) / 100,
+      precision: Math.round(precision * 10000) / 100,
+      recall: Math.round(recall * 10000) / 100,
+      f1_score: Math.round(f1 * 10000) / 100,
       threshold: parseFloat(threshold),
-      totalWithOutcome: total,
-      scoreDistribution: distResult.rows[0],
       period: `${days} days`,
+      score_distribution: distResult.rows[0],
     });
   });
 

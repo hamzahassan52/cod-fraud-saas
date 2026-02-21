@@ -113,11 +113,11 @@ export default function AnalyticsPage() {
     low: parseInt(day.delivered || 0),
   }));
 
-  const mlAccuracy = mlData?.accuracy ? Math.round(mlData.accuracy * 100) : null;
-  const mlPrecision = mlData?.precision ? Math.round(mlData.precision * 100) : null;
-  const mlRecall = mlData?.recall ? Math.round(mlData.recall * 100) : null;
-  const mlF1 = mlData?.f1_score ? Math.round(mlData.f1_score * 100) : null;
-  const mlAuc = mlData?.auc_roc ? Math.round(mlData.auc_roc * 100) : null;
+  const mlAccuracy = mlData?.performance?.accuracy ? Math.round(mlData.performance.accuracy * 100) : null;
+  const mlPrecision = mlData?.performance?.precision ? Math.round(mlData.performance.precision * 100) : null;
+  const mlRecall = mlData?.performance?.recall ? Math.round(mlData.performance.recall * 100) : null;
+  const mlF1 = mlData?.performance?.f1_score ? Math.round(mlData.performance.f1_score * 100) : null;
+  const mlAuc = mlData?.performance?.auc_roc ? Math.round(mlData.performance.auc_roc * 100) : null;
 
   return (
     <DashboardLayout>

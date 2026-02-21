@@ -196,11 +196,11 @@ export default function Dashboard() {
   }));
 
   // ML
-  const accuracy = mlMetrics?.accuracy ? Math.round(mlMetrics.accuracy * 100) : null;
-  const f1 = mlMetrics?.f1_score ? Math.round(mlMetrics.f1_score * 100) : null;
+  const accuracy = mlMetrics?.performance?.accuracy ? Math.round(mlMetrics.performance.accuracy * 100) : null;
+  const f1 = mlMetrics?.performance?.f1_score ? Math.round(mlMetrics.performance.f1_score * 100) : null;
   const isModelHealthy = accuracy != null ? accuracy >= 80 : null;
 
-  const modelVersion: string = mlMetrics?.model_version || '';
+  const modelVersion: string = mlMetrics?.model_info?.version || '';
   let modelAge: number | null = null;
   const mv = modelVersion.match(/v(\d{8})/);
   if (mv) {
