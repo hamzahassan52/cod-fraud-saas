@@ -23,7 +23,7 @@
 
 ## Architecture
 - **Backend**: Node.js + TypeScript + Fastify + PostgreSQL + Redis + BullMQ
-- **ML Service**: Python + FastAPI + XGBoost (separate microservice)
+- **ML Service**: Python + FastAPI + XGBoost+LightGBM ensemble (separate microservice)
 - **Frontend**: Next.js 14 + Tailwind CSS + Recharts + next-themes (dark mode)
 - **Deployment**: Vercel (frontend) + Railway (backend + ML + Postgres + Redis)
 - **CI/CD**: Push to `main` branch → auto-deploy everywhere
@@ -34,7 +34,7 @@
 | Service | Type | Notes |
 |---------|------|-------|
 | Backend | Dockerfile | Runs migration on startup, then starts Fastify + BullMQ worker |
-| ML Service | Dockerfile | Trains model during Docker build, serves via uvicorn |
+| ML Service | Dockerfile | Loads pre-trained model from `models/`, instant start — NO training at build time |
 | PostgreSQL | Managed | Public URL: `postgresql://postgres:LffCkMqCOGGAIeQJQlHyMYKHuDJvwjbb@shinkansen.proxy.rlwy.net:23453/railway` |
 | Redis | Managed | Requires auth (password in URL) |
 
@@ -47,7 +47,8 @@
 - Railway sets PORT dynamically (usually 8080) — never hardcode ports
 - BullMQ Redis connection must include password/username parsed from URL (fixed in `scoring-queue.ts`)
 - Migration script (`migrate.ts`) is non-fatal — retries 5x then exits 0 so server still starts
-- ML model trains during Docker build: `RUN python scripts/generate_synthetic_data.py --n 20000 && python train.py --csv data/training_data.csv`
+- **ML training is OFFLINE** — Dockerfile does NOT train. Workflow: run `python scripts/train_offline.py` locally → commit `models/latest.joblib` + `models/latest_meta.json` → push → Railway COPY loads it instantly
+- If no `models/latest.joblib` found at startup, `startup.sh` trains once with 30K synthetic samples as fallback
 - Backend CORS uses `CORS_ORIGINS` env var in production, `true` in development
 - **DO NOT use Railway internal networking** (`*.railway.internal`) — it's unreliable, use public URLs
 - Vercel auto-deploy from GitHub can disconnect — if broken, deploy manually: `vercel --prod --yes` from repo root (not frontend dir). `.vercel/project.json` must exist at root.
@@ -83,7 +84,7 @@ cod-fraud-saas/
 │   │   │   │   ├── rules.ts       # Rule-based scoring (15+ rules)
 │   │   │   │   └── statistical.ts # Statistical scoring (phone history, city rates)
 │   │   │   ├── ml-client/
-│   │   │   │   └── index.ts       # ML HTTP client + toMLFeatures() — maps 35 features
+│   │   │   │   └── index.ts       # ML HTTP client + toMLFeatures() — maps 48 features
 │   │   │   ├── phone-normalizer/  # Pakistani phone normalization (+92, 03xx)
 │   │   │   ├── cache/             # Redis caching service
 │   │   │   ├── queue/
@@ -92,19 +93,23 @@ cod-fraud-saas/
 │   │   └── types/                 # TypeScript interfaces
 │   └── .env.example
 ├── ml-service/            # Python ML microservice
-│   ├── Dockerfile         # Railway deployment (trains model at build time)
+│   ├── Dockerfile         # Railway deployment — NO training, just installs deps + copies code
 │   ├── app.py             # FastAPI server + /predict + /health + pipeline endpoints
-│   ├── train.py           # XGBoost training (v1 basic + v2 with validation/versioning)
-│   ├── requirements.txt   # Python deps (xgboost, fastapi, scikit-learn, etc.)
-│   ├── startup.sh         # Fallback startup (trains if no model exists)
+│   ├── train.py           # XGBoost+LightGBM ensemble training (v1 basic + v2 with validation/versioning)
+│   ├── requirements.txt   # Python deps (xgboost, lightgbm, fastapi, scikit-learn, etc.)
+│   ├── startup.sh         # Copies models/latest.joblib → versions/ on start; trains once as fallback if missing
+│   ├── models/            # Pre-trained models committed to git (loaded by Docker at startup)
+│   │   ├── .gitkeep       # Ensures dir tracked by git
+│   │   ├── latest.joblib  # Latest pre-trained model (committed after running train_offline.py)
+│   │   └── latest_meta.json # Model metadata (version, metrics, feature_names, optimal_threshold)
 │   ├── api/
-│   │   ├── predict.py     # Prediction endpoint logic
-│   │   └── schemas.py     # Pydantic request/response schemas
+│   │   ├── predict.py     # Prediction endpoint logic — returns optimal_threshold in response
+│   │   └── schemas.py     # Pydantic request/response schemas (PredictionResponse has optimal_threshold)
 │   ├── utils/
-│   │   └── model_manager.py # Model versioning, loading, comparison
+│   │   └── model_manager.py # Model versioning, loading, comparison — ModelArtifact has optimal_threshold field
 │   ├── pipeline/          # ML pipeline package
 │   │   ├── __init__.py
-│   │   ├── feature_map.py      # 35 feature names — SINGLE SOURCE OF TRUTH
+│   │   ├── feature_map.py      # 48 features — SINGLE SOURCE OF TRUTH + FEATURE_GROUPS + REQUIRED_FEATURES
 │   │   ├── data_collector.py   # Export training data from DB (joins orders+phones+rto)
 │   │   ├── data_validator.py   # Clean, validate, impute, check class balance
 │   │   ├── data_versioner.py   # Parquet snapshots with metadata tracking
@@ -113,7 +118,8 @@ cod-fraud-saas/
 │   │   ├── drift_detector.py   # KS test + mean shift drift detection
 │   │   └── scheduler.py        # Auto-retrain triggers (drift/performance/scheduled)
 │   ├── scripts/
-│   │   ├── generate_synthetic_data.py  # 20K Pakistan COD-specific samples
+│   │   ├── train_offline.py            # OFFLINE training pipeline — run locally, commit models/
+│   │   ├── generate_synthetic_data.py  # 30K Pakistan COD-specific samples (48 features)
 │   │   ├── export_training_data.py     # CLI for DB data export
 │   │   └── run_drift_check.py          # CLI for drift check
 │   └── .env.example
@@ -172,13 +178,18 @@ cod-fraud-saas/
 
 ## Key Technical Decisions
 - **Fraud Engine**: 3-layer architecture — Rule-based (30%) + Statistical (30%) + ML/XGBoost (40%)
-- **35 ML Features**: Aligned between backend `ml-client/index.ts:toMLFeatures()` and ML model via `pipeline/feature_map.py`
+- **48 ML Features**: Aligned between backend `ml-client/index.ts:toMLFeatures()` and ML model via `pipeline/feature_map.py`. 4 groups: A_static_order, B_behavioral_velocity, C_contextual_seasonal, D_derived_interaction
+- **REQUIRED_FEATURES**: `[order_amount, is_cod, order_hour]` — inference refused without these
+- **ML Ensemble**: XGBoost (15 iter, 3-fold CV, scale_pos_weight) + LightGBM (10 iter, 3-fold CV, class_weight='balanced') → soft-voting VotingClassifier
+- **Probability Calibration**: `CalibratedClassifierCV(ensemble, cv='prefit', method='isotonic')` on validation set
+- **Threshold Optimization**: `find_optimal_threshold()` on val set via precision_recall_curve → maximize F1 (not default 0.5)
+- **Offline Training Workflow**: Run `python scripts/train_offline.py` locally → commit `models/latest.joblib` → Railway loads it instantly. MIN_REAL_ORDERS = 3000 before switching to real/hybrid mode.
 - **Plugin System**: Adding new e-commerce platforms = add 1 file in `backend/src/plugins/`
 - **Multi-tenant**: Tenant isolation via `tenant_id` FK on all tables
 - **Auth**: JWT tokens (dashboard login) + API Keys (webhook/API integration)
 - **Queue**: BullMQ for async order scoring — plan-based priority (enterprise=1, free=5)
 - **ML Pipeline**: Data collection → validation → versioning → training → drift detection → auto-retrain
-- **Cold Start Strategy**: Synthetic 20K samples (82.85% accuracy) → gradually replaced by real data as orders accumulate
+- **Cold Start Strategy**: Synthetic 30K samples → gradually replaced by real data as orders accumulate (min 3000 real labeled orders needed)
 - **Shopify OAuth**: Install → HMAC-verified callback → access_token exchange → webhook registration → saved to `shopify_connections` table
 
 ## Database
@@ -248,12 +259,16 @@ cod-fraud-saas/
 - `GET /metrics` — Prometheus metrics
 
 ## ML Model
-- **Algorithm**: XGBoost binary classifier with RandomizedSearchCV (100 iterations, 10-fold CV)
-- **Features**: 35 features covering order, customer, phone, city, product, and interaction signals
-- **Current accuracy**: 82.85% (AUC-ROC: 89.26%) on synthetic Pakistan COD data
-- **Training data**: 20K synthetic samples with Pakistan-specific patterns (Eid, Ramadan, city RTO rates, product categories)
+- **Algorithm**: XGBoost + LightGBM soft-voting ensemble with RandomizedSearchCV (15 iter XGB + 10 iter LGB, 3-fold CV each), then `CalibratedClassifierCV(isotonic)` on validation set
+- **Features**: 48 features in 4 groups — A_static_order (order/discount/timing), B_behavioral_velocity (customer history/velocity/account age), C_contextual_seasonal (city rates, Eid/Ramadan/sale periods), D_derived_interaction (combined signals)
+- **Pakistan-specific signals**: `is_eid_period` (months 4,6,7), `is_ramadan` (months 3,4), `is_sale_period` (11.11/12.12/Black Friday), `orders_last_1h` (flash fraud detection)
+- **Threshold**: Optimized via `precision_recall_curve` on validation set (maximize F1) — stored as `optimal_threshold` in model metadata, not hardcoded 0.5
+- **Training data**: 30K synthetic samples (Pakistan COD-specific patterns) — real data transition at 3000+ labeled orders
+- **Training workflow**: OFFLINE — run `scripts/train_offline.py` locally, commit `models/latest.joblib`, Railway loads it at startup
 - **Drift detection**: KS test + mean shift on feature distributions
-- **Feature name alignment**: Backend `toMLFeatures()` must match `pipeline/feature_map.py` exactly
+- **Feature name alignment**: Backend `toMLFeatures()` MUST match `pipeline/feature_map.py` EXACTLY — both have 48 features
+- **Class imbalance**: No SMOTE — uses `scale_pos_weight` (XGBoost) and `class_weight='balanced'` (LightGBM)
+- **Memory safety**: `n_jobs=2` for training, `--workers 1` for uvicorn (Railway memory limits)
 
 ## Frontend Pages (Navigation Order)
 1. **Dashboard** (`/`) — "Revenue Protection Command Center". 5 parallel API calls. Sections: Financial Impact (Capital Protected, Est. Loss Prevented, Net Revenue Saved, Protection ROI with sparklines + prior period delta), Risk Overview (Total Orders, Blocked, Under Review, RTO Rate with color coding), Urgent Review Banner, Trends (Capital Protected trend chart + RTO Rate Comparison), Risk & Intelligence (donut + fraud triggers), Operational Action (urgent orders table + high-risk cities), AI Engine Status (Model Accuracy, F1, Avg Confidence, False Positive Rate, Model Age + Repeat Offenders, Override Rate, Fraud Velocity Index). Period selector: 24h / 7d.
@@ -303,9 +318,23 @@ cd backend && npm run typecheck     # Type check only
 
 # ML Service
 cd ml-service && uvicorn app:app --port 8000           # Run server
-python scripts/generate_synthetic_data.py --n 20000    # Generate data
-python train.py --csv data/training_data.csv           # Train model
-python train.py --v2                                    # Train with validation
+
+# Offline training (run locally, then commit models/)
+python scripts/train_offline.py --mode synthetic --samples 30000  # Train on 30K synthetic data
+python scripts/train_offline.py --mode real                       # Train on real DB data (needs 3000+ orders)
+python scripts/train_offline.py --mode hybrid                     # Train on synthetic + real combined
+python scripts/train_offline.py --check-real-data                 # Check if enough real data exists
+python scripts/train_offline.py --no-calibrate                    # Skip probability calibration
+python scripts/train_offline.py --target-recall 0.85              # Set recall target for threshold
+
+# After training, commit the model:
+git add ml-service/models/latest.joblib ml-service/models/latest_meta.json
+git commit -m "Update pre-trained model"
+git push origin main  # Railway will load new model on next startup
+
+# Other ML commands
+python scripts/generate_synthetic_data.py --n 30000    # Generate synthetic training data
+python train.py --csv data/training_data.csv           # Legacy train (v1)
 python scripts/run_drift_check.py                       # Check drift
 python scripts/export_training_data.py                  # Export from DB
 
@@ -329,13 +358,15 @@ vercel --prod --yes   # run from repo root (not frontend dir)
 
 ## Known Fixed Issues (Don't Re-Introduce)
 - BullMQ Redis must include password from URL (`scoring-queue.ts` line 13-18)
-- ML Dockerfile must use `--csv` flag: `python train.py --csv data/training_data.csv` (no DB at build time)
+- **ML Dockerfile must NOT train** — training was removed to avoid build timeouts (100K samples + SMOTE + CV = 25+ min timeout). Training is now done offline via `scripts/train_offline.py`, model committed to `models/`
+- **No SMOTE** — removed because it caused build timeouts and memory issues. Use `scale_pos_weight` (XGB) + `class_weight='balanced'` (LGB) instead
 - Migration must be non-fatal (exits 0 even on failure, 5 retries)
 - Backend CORS must use `CORS_ORIGINS` env var in production
 - `shap` package commented out in requirements.txt (requires cmake, fails in CI)
 - External order lookup (`/orders/external/:platform/:id`) uses `o.risk_score, o.risk_level, o.recommendation` from orders table — NOT from fraud_scores table (those columns don't exist on fraud_scores)
 - Fraud signal field from analytics API is `signal_name` (not `signal` or `signal_type`)
 - Vercel deploy must be run from repo root with `.vercel/project.json` present — not from `frontend/` directory
+- VotingClassifier does NOT have `feature_importances_` directly — must access via `model.estimators_[0].feature_importances_` and `model.estimators_[1].feature_importances_`
 
 ## Shopify Extension Setup (Pending)
 The `shopify-extension/` directory is ready but needs:
