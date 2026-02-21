@@ -78,11 +78,29 @@ function FeatureBar({ feature, importance, maxImportance }: { feature: string; i
   );
 }
 
+interface TrainingStats {
+  total: number;
+  unused: number;
+  label0: number;
+  label1: number;
+  threshold: number;
+  readyToRetrain: boolean;
+  last_retrain: {
+    status: string;
+    new_model_version: string;
+    new_f1: number;
+    promoted: boolean;
+    completed_at: string;
+    triggered_by: string;
+  } | null;
+}
+
 export default function MLPage() {
   const [metrics, setMetrics] = useState<ModelMetrics | null>(null);
   const [confusion, setConfusion] = useState<ConfusionMatrixData | null>(null);
   const [versions, setVersions] = useState<ModelVersion[]>([]);
   const [health, setHealth] = useState<HealthStatus | null>(null);
+  const [trainingStats, setTrainingStats] = useState<TrainingStats | null>(null);
 
   const [metricsLoading, setMetricsLoading] = useState(true);
   const [confusionLoading, setConfusionLoading] = useState(true);
@@ -96,6 +114,7 @@ export default function MLPage() {
     fetchMetrics();
     fetchVersions();
     fetchHealth();
+    fetchTrainingStats();
   }, []);
 
   useEffect(() => {
@@ -148,6 +167,15 @@ export default function MLPage() {
       setHealth({ status: 'unhealthy', model_loaded: false, version: 'N/A', uptime: 0, last_prediction: '' });
     } finally {
       setHealthLoading(false);
+    }
+  };
+
+  const fetchTrainingStats = async () => {
+    try {
+      const res = await mlApi.trainingStats();
+      setTrainingStats(res.data);
+    } catch {
+      // non-critical, silently ignore
     }
   };
 
@@ -247,6 +275,84 @@ export default function MLPage() {
                     <p className="text-xs text-gray-500 dark:text-slate-400 uppercase tracking-wide">Features</p>
                     <p className="text-sm font-semibold text-gray-900 dark:text-slate-100 mt-0.5">{modelInfo.feature_count || 'N/A'}</p>
                   </div>
+                </div>
+              </Card>
+            )}
+
+            {/* Self-Learning Progress */}
+            {trainingStats !== null && (
+              <Card title="Self-Learning Progress" subtitle="Real delivery outcomes collected for model retraining">
+                <div className="space-y-4">
+                  {/* Progress bar */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm text-gray-600 dark:text-slate-400">
+                        Real labeled outcomes collected
+                      </span>
+                      <span className={clsx(
+                        'text-sm font-bold',
+                        trainingStats.readyToRetrain ? 'text-green-500' : 'text-gray-900 dark:text-slate-100'
+                      )}>
+                        {trainingStats.unused} / {trainingStats.threshold}
+                      </span>
+                    </div>
+                    <div className="w-full bg-gray-100 dark:bg-slate-700 rounded-full h-3">
+                      <div
+                        className={clsx(
+                          'h-3 rounded-full transition-all duration-700',
+                          trainingStats.readyToRetrain
+                            ? 'bg-green-500'
+                            : trainingStats.unused > trainingStats.threshold * 0.5
+                              ? 'bg-blue-500'
+                              : 'bg-gray-400'
+                        )}
+                        style={{ width: `${Math.min((trainingStats.unused / trainingStats.threshold) * 100, 100)}%` }}
+                      />
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-slate-500 mt-1">
+                      {trainingStats.readyToRetrain
+                        ? '✅ Ready to retrain — run scripts/retrain_from_outcomes.py'
+                        : `${trainingStats.threshold - trainingStats.unused} more outcomes needed to trigger retraining`}
+                    </p>
+                  </div>
+
+                  {/* Stats grid */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-3 text-center">
+                      <p className="text-2xl font-bold text-gray-900 dark:text-slate-100">{trainingStats.total}</p>
+                      <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">Total Outcomes</p>
+                    </div>
+                    <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-3 text-center">
+                      <p className="text-2xl font-bold text-green-600 dark:text-green-400">{trainingStats.label0}</p>
+                      <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">Delivered (label 0)</p>
+                    </div>
+                    <div className="bg-red-50 dark:bg-red-900/20 rounded-lg p-3 text-center">
+                      <p className="text-2xl font-bold text-red-500 dark:text-red-400">{trainingStats.label1}</p>
+                      <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">Returned (label 1)</p>
+                    </div>
+                    <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 text-center">
+                      <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{trainingStats.unused}</p>
+                      <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">Unused (new)</p>
+                    </div>
+                  </div>
+
+                  {/* Last retrain info */}
+                  {trainingStats.last_retrain && (
+                    <div className={clsx(
+                      'flex items-center gap-3 p-3 rounded-lg text-sm',
+                      trainingStats.last_retrain.promoted
+                        ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400'
+                        : 'bg-gray-50 dark:bg-slate-700/50 text-gray-600 dark:text-slate-400'
+                    )}>
+                      <span>{trainingStats.last_retrain.promoted ? '✅' : 'ℹ️'}</span>
+                      <span>
+                        Last retrain: {trainingStats.last_retrain.promoted
+                          ? `Promoted to ${trainingStats.last_retrain.new_model_version} (F1: ${trainingStats.last_retrain.new_f1 ? (trainingStats.last_retrain.new_f1 * 100).toFixed(1) + '%' : 'N/A'})`
+                          : `Not promoted (${trainingStats.last_retrain.status})`}
+                        {' · '}{new Date(trainingStats.last_retrain.completed_at).toLocaleDateString()}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </Card>
             )}

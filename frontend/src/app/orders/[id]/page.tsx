@@ -7,7 +7,6 @@ import { ordersApi, analyticsApi } from '@/lib/api';
 import DashboardLayout from '@/components/layout/dashboard-layout';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Modal } from '@/components/ui/modal';
 import clsx from 'clsx';
 
 interface FraudSignal {

@@ -47,6 +47,8 @@ async function migrate() {
           // Unique index for tracking_number (only if not exists)
           `CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_tracking_unique ON orders(tracking_number) WHERE tracking_number IS NOT NULL`,
           `CREATE INDEX IF NOT EXISTS idx_orders_final_status ON orders(tenant_id, final_status, created_at DESC)`,
+          // Backfill: set default final_status for existing rows that have NULL
+          `UPDATE orders SET final_status = 'pending' WHERE final_status IS NULL`,
         ];
 
         for (const stmt of alterStatements) {

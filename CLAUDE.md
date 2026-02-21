@@ -66,18 +66,19 @@ cod-fraud-saas/
 │   │   ├── config/        # Environment config (index.ts) — includes shopify: {clientId, clientSecret, scopes}
 │   │   ├── db/
 │   │   │   ├── connection.ts  # PostgreSQL pool + query helper
-│   │   │   ├── schema.sql     # Full schema (15 tables incl. shopify_connections)
-│   │   │   └── migrate.ts     # Auto-migration with 5 retries
+│   │   │   ├── schema.sql     # Full schema (17 tables incl. shopify_connections, training_events, retrain_jobs)
+│   │   │   └── migrate.ts     # Auto-migration with 5 retries + backfill for new columns
 │   │   ├── middlewares/    # JWT auth, API key auth, validation, metrics, security
 │   │   ├── plugins/       # Platform plugins (Shopify, WooCommerce, Magento, Joomla)
 │   │   ├── routes/
 │   │   │   ├── webhook.ts         # POST /webhook/:platform — receives orders
-│   │   │   ├── orders.routes.ts   # CRUD + override + risk breakdown + external lookup
+│   │   │   ├── orders.routes.ts   # CRUD + override + dispatch + call-outcome + external lookup
+│   │   │   ├── scanner.routes.ts  # Return scanner: POST /scan + GET /lookup/:tracking_number
 │   │   │   ├── blacklist.routes.ts # Add/list/remove blacklist entries
 │   │   │   ├── analytics.routes.ts # Dashboard analytics + RTO report + feedback + performance
 │   │   │   ├── auth.ts            # Register, login, profile, plan, API keys
-│   │   │   ├── ml.ts              # ML metrics, confusion matrix, thresholds, versions, health
-│   │   │   ├── shopify.routes.ts  # NEW — Shopify OAuth (install/callback/status/disconnect)
+│   │   │   ├── ml.ts              # ML metrics, confusion matrix, thresholds, versions, health, training-stats, retrain-jobs
+│   │   │   ├── shopify.routes.ts  # Shopify OAuth (install/callback/status/disconnect)
 │   │   │   ├── settings.ts        # Threshold settings
 │   │   │   └── health.ts          # /health, /ready, /live, /metrics
 │   │   ├── services/
@@ -87,6 +88,10 @@ cod-fraud-saas/
 │   │   │   │   └── statistical.ts # Statistical scoring (phone history, city rates)
 │   │   │   ├── ml-client/
 │   │   │   │   └── index.ts       # ML HTTP client + toMLFeatures() — maps 48 features
+│   │   │   ├── training/
+│   │   │   │   └── training-events.ts # createTrainingEvent, updatePhoneStats, getTrainingStats, shouldTriggerRetrain
+│   │   │   ├── cron/
+│   │   │   │   └── auto-delivered.ts  # Nightly cron: marks dispatched orders >7 days old as delivered (label=0)
 │   │   │   ├── phone-normalizer/  # Pakistani phone normalization (+92, 03xx)
 │   │   │   ├── cache/             # Redis caching service
 │   │   │   ├── queue/
@@ -121,6 +126,7 @@ cod-fraud-saas/
 │   │   └── scheduler.py        # Auto-retrain triggers (drift/performance/scheduled)
 │   ├── scripts/
 │   │   ├── train_offline.py            # OFFLINE training pipeline — run locally, commit models/
+│   │   ├── retrain_from_outcomes.py    # Self-learning retrain from training_events table in DB
 │   │   ├── generate_synthetic_data.py  # 30K Pakistan COD-specific samples (48 features)
 │   │   ├── export_training_data.py     # CLI for DB data export
 │   │   └── run_drift_check.py          # CLI for drift check
@@ -134,14 +140,15 @@ cod-fraud-saas/
 │   │   │   ├── orders/[id]/page.tsx # Order detail + 3-layer risk breakdown
 │   │   │   ├── analytics/page.tsx # "Fraud Intelligence Lab" — 4 sections, Export CSV
 │   │   │   ├── blacklist/page.tsx # Blacklist CRUD + reason modals
-│   │   │   ├── ml/page.tsx        # ML metrics, confusion matrix, feature importance, versions
+│   │   │   ├── scanner/page.tsx   # Return Scanner — scan tracking number → mark returned → save ML training event
+│   │   │   ├── ml/page.tsx        # ML metrics, confusion matrix, feature importance, versions, self-learning progress
 │   │   │   ├── settings/page.tsx  # Account, plan, thresholds, API keys, Platform Integrations
 │   │   │   ├── billing/page.tsx   # Billing & plan info
 │   │   │   └── login/page.tsx     # Login page
 │   │   ├── components/
 │   │   │   ├── layout/
 │   │   │   │   ├── dashboard-layout.tsx  # Main layout wrapper (lg:pl-64, p-4 sm:p-6)
-│   │   │   │   ├── sidebar.tsx           # Nav sidebar — 7 items: Dashboard, Orders, Analytics, Blacklist, ML Insights, Settings, Billing
+│   │   │   │   ├── sidebar.tsx           # Nav sidebar — 8 items: Dashboard, Orders, Analytics, Blacklist, Scanner, ML Insights, Settings, Billing
 │   │   │   │   ├── Topbar.tsx            # Sticky top bar with hamburger menu (mobile), theme toggle
 │   │   │   │   └── StoreSwitcher.tsx     # Store/tenant switcher in topbar
 │   │   │   ├── charts/
@@ -195,9 +202,14 @@ cod-fraud-saas/
 - **Shopify OAuth**: Install → HMAC-verified callback → access_token exchange → webhook registration → saved to `shopify_connections` table
 
 ## Database
-- PostgreSQL 16 with 15 tables (full schema: `backend/src/db/schema.sql`)
-- Key tables: `tenants`, `users`, `orders`, `fraud_scores`, `phones`, `blacklist`, `model_versions`, `prediction_logs`, `performance_snapshots`, `risk_logs`, `api_keys`, `shopify_connections`
+- PostgreSQL 16 with 17 tables (full schema: `backend/src/db/schema.sql`)
+- Key tables: `tenants`, `users`, `orders`, `fraud_scores`, `phones`, `blacklist`, `model_versions`, `prediction_logs`, `performance_snapshots`, `risk_logs`, `api_keys`, `shopify_connections`, `training_events`, `retrain_jobs`
 - Auto-migration on startup via `backend/src/db/migrate.ts` (non-fatal, 5 retries)
+- **`orders` table new columns**: `tracking_number VARCHAR(100) UNIQUE`, `final_status VARCHAR(20) DEFAULT 'pending'`, `call_confirmed VARCHAR(20)`, `dispatched_at TIMESTAMPTZ`, `returned_at TIMESTAMPTZ`
+  - `final_status` = physical delivery state: `pending` → `dispatched` → `delivered` / `returned`
+  - `status` = ML/verification decision: `scored` / `approved` / `blocked` / `verified` / `rto` — these two must NEVER be mixed
+- **`training_events` table**: Immutable ML dataset. One row per order (UNIQUE on order_id). Fields: `feature_snapshot JSONB` (features at prediction time), `final_label SMALLINT` (0=delivered, 1=returned), `call_confirmed`, `model_version`, `prediction_score`, `prediction_correct BOOLEAN`, `outcome_source VARCHAR(20)` (scanner/cron), `used_in_training BOOLEAN DEFAULT FALSE`
+- **`retrain_jobs` table**: History of every retraining run with before/after F1, AUC, model version, promotion decision and reason
 
 ## API Endpoints
 ### Auth
@@ -216,7 +228,13 @@ cod-fraud-saas/
 - `GET /api/v1/orders/:id` — Order detail
 - `GET /api/v1/orders/risk/:orderId` — 3-layer risk score breakdown
 - `POST /api/v1/orders/:id/override` — Manual override (APPROVE/BLOCK)
+- `POST /api/v1/orders/:id/dispatch` — Mark dispatched (body: `tracking_number`). Sets `final_status = 'dispatched'`, does NOT change `status`
+- `POST /api/v1/orders/:id/call-outcome` — Save agent call result (body: `call_confirmed: 'yes'|'no'|'no_answer'`)
 - `GET /api/v1/orders/external/:platform/:externalOrderId` — External order lookup by API key (for Shopify Extension)
+
+### Scanner
+- `POST /api/v1/scanner/scan` — Scan return (body: `tracking_number`). Sets `final_status = 'returned'`, `status = 'rto'`, creates `training_event(label=1)`, updates phone stats. Returns: `{result: 'marked_returned'|'already_processed'|'not_found'}`
+- `GET /api/v1/scanner/lookup/:tracking_number` — Preview order before scan (read-only)
 
 ### Blacklist
 - `POST /api/v1/blacklist` — Add entry (type: phone/email/ip/address/name)
@@ -238,6 +256,8 @@ cod-fraud-saas/
 - `GET /api/v1/ml/health` — ML service health status
 - `GET /api/v1/ml/performance-history` — Historical performance snapshots
 - `POST /api/v1/ml/generate-snapshot` — Trigger performance snapshot
+- `GET /api/v1/ml/training-stats` — Self-learning stats: total/unused/label0/label1 outcomes, readyToRetrain flag, last retrain job info
+- `GET /api/v1/ml/retrain-jobs` — Last 20 retraining job records (triggered_by, status, F1 before/after, promoted, reason)
 
 ### Shopify OAuth
 - `GET /api/v1/shopify/install` — Redirect to Shopify OAuth (params: shop, tenant_id)
@@ -279,9 +299,10 @@ cod-fraud-saas/
 2. **Orders** (`/orders`) — Filterable table (search, risk level, decision, status, sortBy). Override actions use professional modal. Risk summary truncates with info icon. Table wrapped in overflow-x-auto for mobile.
 3. **Analytics** (`/analytics`) — "Fraud Intelligence Lab". 4 sections: Performance Metrics (8 KPIs: 4 analytics + 4 ML), Trend Analysis (3 charts + 7/30/90d selector), Fraud Intelligence (signals + platform breakdown + cities table), Advanced (collapsible, 3 Coming Soon cards). Export CSV button.
 4. **Blacklist** (`/blacklist`) — CRUD table with type tabs (all/phone/email/ip/address/name). Add form. Reason column shows info icon for long reasons → opens modal.
-5. **ML Insights** (`/ml`) — Model info, 5 performance metrics, confusion matrix (7d/30d/90d), top 10 feature importance bars, model versions table, service health.
-6. **Settings** (`/settings`) — Account info, plan & usage bar, scoring threshold sliders (visual gradient bar), API key management, Platform Integrations (Shopify OAuth card + WooCommerce/Magento/Joomla/Custom webhook cards with copy URL + expandable instructions).
-7. **Billing** (`/billing`) — Full-width. Current plan as a large gradient card with usage bar and days remaining. Plans grid (`grid-cols-1 sm:grid-cols-2 xl:grid-cols-4`) with bigger cards, popular badge, current plan ring. Improved invoice history table with hover states.
+5. **Scanner** (`/scanner`) — Return scanner for warehouse staff. Enter/scan tracking number → marks order as returned, saves ML training event (label=1). Shows result card (green/yellow/red) + scan history (last 10 scans with timestamps). Auto-focuses input after each scan.
+6. **ML Insights** (`/ml`) — Model info, 5 performance metrics, confusion matrix (7d/30d/90d), top 10 feature importance bars, model versions table, service health, **Self-Learning Progress card** (progress bar showing unused outcomes vs 500 threshold, stats: total/delivered/returned/unused, last retrain info).
+7. **Settings** (`/settings`) — Account info, plan & usage bar, scoring threshold sliders (visual gradient bar), API key management, Platform Integrations (Shopify OAuth card + WooCommerce/Magento/Joomla/Custom webhook cards with copy URL + expandable instructions).
+8. **Billing** (`/billing`) — Full-width. Current plan as a large gradient card with usage bar and days remaining. Plans grid (`grid-cols-1 sm:grid-cols-2 xl:grid-cols-4`) with bigger cards, popular badge, current plan ring. Improved invoice history table with hover states.
 8. **Login** (`/login`) — Split-screen: left dark panel (hidden on mobile) with custom SVG shield logo + feature list; right white panel with form. Show/hide password, labels above inputs, responsive tab switcher.
 
 ## UI Components
@@ -301,12 +322,13 @@ cod-fraud-saas/
 
 ## api.ts — All Exported API Objects
 ```typescript
-authApi    — login, register
-ordersApi  — list, get, getRisk, override
+authApi      — login, register
+ordersApi    — list, get, getRisk, override, dispatch(id, tracking_number), callOutcome(id, call_confirmed, notes?)
 blacklistApi — list, add, remove
-mlApi      — metrics, confusionMatrix, threshold, versions, health, performanceHistory, generateSnapshot
+mlApi        — metrics, confusionMatrix, threshold, versions, health, performanceHistory, generateSnapshot, trainingStats(), retrainJobs()
 analyticsApi — dashboard, rtoReport, submitFeedback, overrideStats, performance
-shopifyApi — status, disconnect
+scannerApi   — scan(tracking_number), lookup(tracking_number)
+shopifyApi   — status, disconnect
 ```
 
 ## Common Commands
@@ -336,6 +358,11 @@ git add ml-service/models/latest.joblib ml-service/models/latest_meta.json
 git commit -m "Update pre-trained model"
 git push origin main  # Railway will load new model on next startup
 
+# Self-learning retrain from real delivery outcomes (run from ml-service/)
+python scripts/retrain_from_outcomes.py --tenant-id <uuid>   # Retrain for one tenant
+python scripts/retrain_from_outcomes.py --all-tenants         # Retrain all tenants with 100+ events
+python scripts/retrain_from_outcomes.py --tenant-id <uuid> --dry-run  # Check data without training
+
 # Other ML commands
 python scripts/generate_synthetic_data.py --n 30000    # Generate synthetic training data
 python train.py --csv data/training_data.csv           # Legacy train (v1)
@@ -360,6 +387,31 @@ vercel --prod --yes   # run from repo root (not frontend dir)
 8. **Mobile first** — All frontend changes must be responsive (mobile/tablet/laptop/large screen)
 9. **Minimize comments** — Owner said no unnecessary comments or explanations in code, just code
 
+## Self-Learning ML Feedback Loop
+The system collects real delivery outcomes to continuously improve the ML model:
+
+**Flow**: Order scored → `POST /orders/:id/dispatch` (sets `final_status = 'dispatched'`) → returned parcel scanned → `POST /scanner/scan` (sets `final_status = 'returned'`, `status = 'rto'`, creates `training_event(label=1)`) OR nightly cron auto-marks as delivered after 7 days (creates `training_event(label=0)`). When 500 unused outcomes accumulate → run `retrain_from_outcomes.py`.
+
+**Key rules**:
+- Blocked orders are NEVER dispatched → never enter training_events (avoids label leakage)
+- `final_label`: 0 = delivered (customer kept order), 1 = returned/RTO (fraud signal)
+- `call_confirmed` is a FEATURE passed to ML, NOT the ground truth label
+- `feature_snapshot` from `fraud_scores.ml_features` is saved at prediction time (prevents training/serving skew)
+- Scanner uses tracking_number (unique per order) as the lookup key
+- `ON CONFLICT (order_id) DO NOTHING` on training_events insert — exactly-once guarantee
+
+**Retraining** (`ml-service/scripts/retrain_from_outcomes.py`):
+- Reads `training_events` from PostgreSQL for a tenant
+- Min checks: 100 samples, 5-95% class balance
+- Trains XGBoost+LightGBM VotingClassifier with calibration
+- Champion/Challenger: promotes if `new_f1 >= current_f1 - 0.01`
+- CLI: `--tenant-id <uuid>`, `--all-tenants`, `--dry-run`
+
+**Nightly cron** (`backend/src/services/cron/auto-delivered.ts`):
+- Runs at 2AM UTC via `setInterval` checking every 5 min if UTC hour == 2
+- Finds orders with `final_status = 'dispatched'` AND `dispatched_at < NOW() - 7 days`
+- Creates `training_event(label=0, outcome_source='cron')` + updates phone stats
+
 ## Known Fixed Issues (Don't Re-Introduce)
 - BullMQ Redis must include password from URL (`scoring-queue.ts` line 13-18)
 - **ML Dockerfile must NOT train** — training was removed to avoid build timeouts. Training is now done offline via `scripts/train_offline.py`, model committed to `models/`
@@ -375,6 +427,9 @@ vercel --prod --yes   # run from repo root (not frontend dir)
 - **`/api/v1/ml/metrics` response structure**: returns `{ active, model_info: {version, model_type, trained_at, training_samples, feature_count}, performance: {accuracy, precision, recall, f1_score, auc_roc}, feature_importance: [{feature, importance}] }`. Frontend reads `mlMetrics.performance.accuracy`, `mlMetrics.model_info.version` etc. — NOT flat top-level keys
 - **`/api/v1/ml/metrics` DB fallback**: if `model_versions` table is empty, falls back to calling ML service `/model/info` directly — so metrics always show even without DB entry
 - **`/api/v1/ml/confusion-matrix` response**: flat fields `{true_positives, true_negatives, false_positives, false_negatives, total}` — not nested under `confusionMatrix` object
+- **Dispatch endpoint must NOT set `status`** — `POST /orders/:id/dispatch` only sets `tracking_number`, `final_status = 'dispatched'`, `dispatched_at`. Never change `status` (ML/verification decision) here — they are orthogonal fields
+- **`final_status` backfill** — `ALTER TABLE ADD COLUMN DEFAULT 'pending'` sets NULL for existing rows (no NOT NULL constraint). Migration includes `UPDATE orders SET final_status = 'pending' WHERE final_status IS NULL` to fix this
+- **Scanner page is dark-themed** — `/scanner` uses dark bg (`bg-gray-800`, `bg-gray-900`) matching the scanner-station aesthetic. This is intentional, not a bug
 
 ## Shopify Extension Setup (Pending)
 The `shopify-extension/` directory is ready but needs:

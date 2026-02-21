@@ -282,7 +282,6 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
            tracking_number = $1,
            final_status = 'dispatched',
            dispatched_at = NOW(),
-           status = 'approved',
            updated_at = NOW()
          WHERE id = $2 AND tenant_id = $3`,
         [tracking_number.trim(), id, tenantId]
