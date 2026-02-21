@@ -47,7 +47,7 @@ jobs:
 
       - run: pip install -r requirements.txt
       - run: python -c "from app import app; print('FastAPI app imports OK')"
-      - run: python -c "from pipeline import FEATURE_NAMES; assert len(FEATURE_NAMES) == 35"
+      - run: python -c "from pipeline import FEATURE_NAMES; assert len(FEATURE_NAMES) == 48"
 
   # ---- Frontend ----
   frontend:
