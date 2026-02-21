@@ -21,6 +21,8 @@ import logging
 import os
 import sys
 import time
+
+import numpy as np
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -252,13 +254,18 @@ async def train_endpoint(body: TrainingRequest | None = None):
 
         # Feature importances (ensemble-safe)
         try:
-            xgb_imp  = model.estimators_[0].feature_importances_
-            lgbm_imp = model.estimators_[1].feature_importances_
-            avg_imp  = (xgb_imp + lgbm_imp) / 2.0
+            imps = [
+                e.feature_importances_
+                for e in getattr(model, "estimators_", [])
+                if hasattr(e, "feature_importances_")
+            ]
+            if imps:
+                avg_imp = np.mean(imps, axis=0)
+            else:
+                avg_imp = np.zeros(len(feature_names))
             importances = dict(zip(feature_names, [round(float(v), 4) for v in avg_imp]))
-        except (AttributeError, IndexError):
-            imp_arr = getattr(model, "feature_importances_", [0.0] * len(feature_names))
-            importances = dict(zip(feature_names, [round(float(v), 4) for v in imp_arr]))
+        except Exception:
+            importances = {n: 0.0 for n in feature_names}
 
         return TrainingResponse(
             version=version,

@@ -48,6 +48,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import joblib
 import numpy as np
 import pandas as pd
+from catboost import CatBoostClassifier
 from lightgbm import LGBMClassifier
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.ensemble import VotingClassifier
@@ -317,14 +318,15 @@ def train_ensemble(
     n_negative: int,
 ) -> VotingClassifier:
     """
-    Train XGBoost + LightGBM soft-voting ensemble.
+    Train XGBoost + LightGBM + CatBoost soft-voting ensemble.
 
     Class imbalance handled via:
-      - XGBoost: scale_pos_weight = n_negative / n_positive
-      - LightGBM: class_weight='balanced'
+      - XGBoost:   scale_pos_weight = n_negative / n_positive
+      - LightGBM:  class_weight='balanced'
+      - CatBoost:  class_weights=[1, scale_pos_weight]
     No SMOTE — avoids memory duplication on Railway.
 
-    Hyperparameter search: 15 iter (XGB) + 10 iter (LGB), 3-fold StratifiedKFold.
+    Hyperparameter search: 30 iter (XGB) + 20 iter (LGB) + 15 iter (CatBoost), 5-fold CV.
     n_jobs=2 for memory safety on Railway containers.
     """
     pos_weight = n_negative / max(n_positive, 1)
@@ -333,7 +335,7 @@ def train_ensemble(
         pos_weight, n_positive, n_negative,
     )
 
-    cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
     # ── XGBoost ────────────────────────────────────────────────────────
     xgb_base = {
@@ -345,20 +347,20 @@ def train_ensemble(
         "n_jobs": 2,
     }
     xgb_grid = {
-        "n_estimators":    [100, 200, 300],
+        "n_estimators":    [100, 200, 300, 400],
         "max_depth":       [3, 4, 5, 6],
         "learning_rate":   [0.01, 0.05, 0.1],
         "subsample":       [0.7, 0.8, 0.9],
-        "colsample_bytree":[0.7, 0.8],
+        "colsample_bytree":[0.7, 0.8, 0.9],
         "min_child_weight":[1, 3, 5],
         "gamma":           [0, 0.1, 0.2],
-        "reg_alpha":       [0, 0.1],
-        "reg_lambda":      [1, 1.5],
+        "reg_alpha":       [0, 0.1, 0.5],
+        "reg_lambda":      [1, 1.5, 2],
     }
-    logger.info("XGBoost: RandomizedSearchCV 15 iter × 3-fold CV ...")
+    logger.info("XGBoost: RandomizedSearchCV 30 iter × 5-fold CV ...")
     xgb_search = RandomizedSearchCV(
         XGBClassifier(**xgb_base), xgb_grid,
-        n_iter=15, cv=cv, scoring="roc_auc",
+        n_iter=30, cv=cv, scoring="roc_auc",
         n_jobs=2, random_state=42, verbose=0,
     )
     xgb_search.fit(X_train, y_train)
@@ -369,22 +371,22 @@ def train_ensemble(
 
     # ── LightGBM ───────────────────────────────────────────────────────
     lgbm_grid = {
-        "n_estimators":     [100, 200, 300],
-        "num_leaves":       [31, 50, 70],
+        "n_estimators":     [100, 200, 300, 400],
+        "num_leaves":       [31, 50, 70, 100],
         "learning_rate":    [0.01, 0.05, 0.1],
         "subsample":        [0.7, 0.8, 0.9],
-        "colsample_bytree": [0.7, 0.8],
+        "colsample_bytree": [0.7, 0.8, 0.9],
         "min_child_samples":[10, 20, 30],
-        "reg_alpha":        [0, 0.1],
-        "reg_lambda":       [1, 1.5],
+        "reg_alpha":        [0, 0.1, 0.5],
+        "reg_lambda":       [1, 1.5, 2],
     }
-    logger.info("LightGBM: RandomizedSearchCV 10 iter × 3-fold CV ...")
+    logger.info("LightGBM: RandomizedSearchCV 20 iter × 5-fold CV ...")
     lgbm_search = RandomizedSearchCV(
         LGBMClassifier(
             random_state=42, verbose=-1, n_jobs=2, class_weight="balanced"
         ),
         lgbm_grid,
-        n_iter=10, cv=cv, scoring="roc_auc",
+        n_iter=20, cv=cv, scoring="roc_auc",
         n_jobs=2, random_state=42, verbose=0,
     )
     lgbm_search.fit(X_train, y_train)
@@ -393,16 +395,46 @@ def train_ensemble(
         lgbm_search.best_score_, lgbm_search.best_params_,
     )
 
-    # ── Soft-voting ensemble ───────────────────────────────────────────
-    logger.info("Building soft-voting ensemble (XGBoost + LightGBM) ...")
+    # ── CatBoost ───────────────────────────────────────────────────────
+    cb_grid = {
+        "iterations":       [200, 300, 400, 500],
+        "depth":            [4, 5, 6, 7],
+        "learning_rate":    [0.01, 0.05, 0.1],
+        "l2_leaf_reg":      [1, 3, 5, 7],
+        "bagging_temperature": [0.0, 0.5, 1.0],
+        "border_count":     [32, 64, 128],
+    }
+    logger.info("CatBoost: RandomizedSearchCV 15 iter × 5-fold CV ...")
+    cb_search = RandomizedSearchCV(
+        CatBoostClassifier(
+            random_seed=42, verbose=0,
+            class_weights=[1.0, pos_weight],
+        ),
+        cb_grid,
+        n_iter=15, cv=cv, scoring="roc_auc",
+        n_jobs=1, random_state=42, verbose=0,
+    )
+    cb_search.fit(X_train, y_train)
+    logger.info(
+        "CatBoost best CV AUC=%.4f  params=%s",
+        cb_search.best_score_, cb_search.best_params_,
+    )
+
+    # ── Soft-voting ensemble (XGBoost + LightGBM + CatBoost) ──────────
+    logger.info("Building soft-voting ensemble (XGBoost + LightGBM + CatBoost) ...")
     best_xgb  = XGBClassifier(**{**xgb_base, **xgb_search.best_params_})
     best_lgbm = LGBMClassifier(**{
         "random_state": 42, "verbose": -1,
         "n_jobs": 2, "class_weight": "balanced",
         **lgbm_search.best_params_,
     })
+    best_cb = CatBoostClassifier(**{
+        "random_seed": 42, "verbose": 0,
+        "class_weights": [1.0, pos_weight],
+        **cb_search.best_params_,
+    })
     ensemble = VotingClassifier(
-        estimators=[("xgb", best_xgb), ("lgbm", best_lgbm)],
+        estimators=[("xgb", best_xgb), ("lgbm", best_lgbm), ("catboost", best_cb)],
         voting="soft", n_jobs=1,
     )
     ensemble.fit(X_train, y_train)
