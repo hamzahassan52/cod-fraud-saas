@@ -324,7 +324,7 @@ export default function SettingsPage() {
           ) : (
             <div className="text-center py-4">
               <p className="text-sm text-gray-500 dark:text-slate-400">Plan information not available</p>
-              <p className="text-xs text-gray-400 dark:text-slate-500 mt-1">Contact support for plan details</p>
+              <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">Contact support for plan details</p>
             </div>
           )}
         </Card>
@@ -484,12 +484,12 @@ export default function SettingsPage() {
           ) : apiKeys.length === 0 ? (
             <div className="text-center py-8">
               <div className="w-12 h-12 bg-gray-100 dark:bg-slate-700 rounded-full flex items-center justify-center mx-auto mb-3">
-                <svg className="w-6 h-6 text-gray-400 dark:text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg className="w-6 h-6 text-gray-500 dark:text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
                 </svg>
               </div>
               <p className="text-sm text-gray-500 dark:text-slate-400">No API keys yet</p>
-              <p className="text-xs text-gray-400 dark:text-slate-500 mt-1">Generate a key to integrate with your e-commerce platform</p>
+              <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">Generate a key to integrate with your e-commerce platform</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -515,7 +515,7 @@ export default function SettingsPage() {
                       <td className="py-2.5 text-gray-500 dark:text-slate-400 text-xs">
                         {key.last_used_at
                           ? new Date(key.last_used_at).toLocaleDateString()
-                          : <span className="text-gray-400 dark:text-slate-500">Never</span>
+                          : <span className="text-gray-500 dark:text-slate-400">Never</span>
                         }
                       </td>
                     </tr>
@@ -664,7 +664,7 @@ export default function SettingsPage() {
                 onKeyDown={(e) => e.key === 'Enter' && connectShopify()}
                 className="w-full rounded-lg border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
-              <p className="mt-1 text-xs text-gray-400 dark:text-slate-500">e.g. mystore or mystore.myshopify.com</p>
+              <p className="mt-1 text-xs text-gray-500 dark:text-slate-400">e.g. mystore or mystore.myshopify.com</p>
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <button
@@ -754,7 +754,7 @@ function WebhookPlatformCard({ platform, name, emoji, copied, expanded, onCopy, 
           <ol className="space-y-1.5">
             {instructions.map((step, i) => (
               <li key={i} className="flex gap-2 text-xs text-gray-600 dark:text-slate-400">
-                <span className="flex-shrink-0 font-semibold text-gray-400 dark:text-slate-500">{i + 1}.</span>
+                <span className="flex-shrink-0 font-semibold text-gray-500 dark:text-slate-400">{i + 1}.</span>
                 <span>{step}</span>
               </li>
             ))}

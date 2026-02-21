@@ -274,7 +274,7 @@ export default function LoginPage() {
           </form>
 
           {/* Footer */}
-          <p className="mt-6 text-center text-xs text-gray-400 dark:text-slate-600">
+          <p className="mt-6 text-center text-xs text-gray-500 dark:text-slate-400">
             {isLogin ? "Don't have an account? " : 'Already have an account? '}
             <button
               onClick={() => { setIsLogin(!isLogin); setError(''); }}

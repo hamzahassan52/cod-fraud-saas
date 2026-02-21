@@ -69,7 +69,7 @@ export default function AnalyticsPage() {
         <div className="flex h-96 items-center justify-center">
           <div className="text-center">
             <div className="mx-auto h-10 w-10 animate-spin rounded-full border-b-2 border-blue-600" />
-            <p className="mt-3 text-sm text-gray-500 dark:text-slate-400">Loading analytics...</p>
+            <p className="mt-3 text-sm font-medium text-gray-600 dark:text-slate-300">Loading analytics...</p>
           </div>
         </div>
       </DashboardLayout>
@@ -126,7 +126,7 @@ export default function AnalyticsPage() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-xl font-bold text-gray-900 dark:text-slate-100 sm:text-2xl">Fraud Intelligence Lab</h1>
-            <p className="text-sm text-gray-500 dark:text-slate-400">Strategic analysis and model performance</p>
+            <p className="text-sm font-medium text-gray-600 dark:text-slate-300">Strategic analysis and model performance</p>
           </div>
           <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             <button
@@ -162,49 +162,49 @@ export default function AnalyticsPage() {
           <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">Performance Metrics</h2>
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
             {/* Analytics KPIs */}
-            <div className="rounded-xl border border-gray-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
-              <p className="text-sm text-gray-500 dark:text-slate-400">RTO Rate</p>
+            <div className="rounded-xl border border-gray-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-800">
+              <p className="text-sm font-medium text-gray-600 dark:text-slate-300">RTO Rate</p>
               <p className={clsx('mt-1 text-3xl font-bold', summary.rtoRate > 20 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400')}>
                 {summary.rtoRate}%
               </p>
-              <p className="mt-1 text-xs text-gray-400 dark:text-slate-500">{summary.totalRto} of {summary.totalRto + summary.totalDelivered} completed</p>
+              <p className="mt-1 text-xs text-gray-500 dark:text-slate-400">{summary.totalRto} of {summary.totalRto + summary.totalDelivered} completed</p>
             </div>
-            <div className="rounded-xl border border-gray-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
-              <p className="text-sm text-gray-500 dark:text-slate-400">Avg Risk Score</p>
+            <div className="rounded-xl border border-gray-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-800">
+              <p className="text-sm font-medium text-gray-600 dark:text-slate-300">Avg Risk Score</p>
               <p className="mt-1 text-3xl font-bold text-gray-900 dark:text-slate-100">{summary.avgRiskScore || 0}</p>
-              <p className="mt-1 text-xs text-gray-400 dark:text-slate-500">Out of 100</p>
+              <p className="mt-1 text-xs text-gray-500 dark:text-slate-400">Out of 100</p>
             </div>
-            <div className="rounded-xl border border-gray-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
-              <p className="text-sm text-gray-500 dark:text-slate-400">Orders Blocked</p>
+            <div className="rounded-xl border border-gray-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-800">
+              <p className="text-sm font-medium text-gray-600 dark:text-slate-300">Orders Blocked</p>
               <p className="mt-1 text-3xl font-bold text-red-600 dark:text-red-400">{summary.blocked}</p>
-              <p className="mt-1 text-xs text-gray-400 dark:text-slate-500">High-risk orders stopped</p>
+              <p className="mt-1 text-xs text-gray-500 dark:text-slate-400">High-risk orders stopped</p>
             </div>
-            <div className="rounded-xl border border-gray-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
-              <p className="text-sm text-gray-500 dark:text-slate-400">Revenue Protected</p>
+            <div className="rounded-xl border border-gray-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-800">
+              <p className="text-sm font-medium text-gray-600 dark:text-slate-300">Revenue Protected</p>
               <p className="mt-1 text-3xl font-bold text-blue-600 dark:text-blue-400">PKR {revenueProtected.toFixed(0)}K</p>
-              <p className="mt-1 text-xs text-gray-400 dark:text-slate-500">Estimated savings</p>
+              <p className="mt-1 text-xs text-gray-500 dark:text-slate-400">Estimated savings</p>
             </div>
 
             {/* ML KPIs */}
-            <div className="rounded-xl border border-gray-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
-              <p className="text-sm text-gray-500 dark:text-slate-400">ML Precision</p>
+            <div className="rounded-xl border border-gray-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-800">
+              <p className="text-sm font-medium text-gray-600 dark:text-slate-300">ML Precision</p>
               <p className="mt-1 text-3xl font-bold text-gray-900 dark:text-slate-100">{mlPrecision !== null ? `${mlPrecision}%` : '—'}</p>
-              <p className="mt-1 text-xs text-gray-400 dark:text-slate-500">True positive rate</p>
+              <p className="mt-1 text-xs text-gray-500 dark:text-slate-400">True positive rate</p>
             </div>
-            <div className="rounded-xl border border-gray-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
-              <p className="text-sm text-gray-500 dark:text-slate-400">ML Recall</p>
+            <div className="rounded-xl border border-gray-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-800">
+              <p className="text-sm font-medium text-gray-600 dark:text-slate-300">ML Recall</p>
               <p className="mt-1 text-3xl font-bold text-gray-900 dark:text-slate-100">{mlRecall !== null ? `${mlRecall}%` : '—'}</p>
-              <p className="mt-1 text-xs text-gray-400 dark:text-slate-500">Fraud detection rate</p>
+              <p className="mt-1 text-xs text-gray-500 dark:text-slate-400">Fraud detection rate</p>
             </div>
-            <div className="rounded-xl border border-gray-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
-              <p className="text-sm text-gray-500 dark:text-slate-400">F1 Score</p>
+            <div className="rounded-xl border border-gray-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-800">
+              <p className="text-sm font-medium text-gray-600 dark:text-slate-300">F1 Score</p>
               <p className="mt-1 text-3xl font-bold text-gray-900 dark:text-slate-100">{mlF1 !== null ? `${mlF1}%` : '—'}</p>
-              <p className="mt-1 text-xs text-gray-400 dark:text-slate-500">Precision-recall balance</p>
+              <p className="mt-1 text-xs text-gray-500 dark:text-slate-400">Precision-recall balance</p>
             </div>
-            <div className="rounded-xl border border-gray-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-800">
-              <p className="text-sm text-gray-500 dark:text-slate-400">AUC-ROC</p>
+            <div className="rounded-xl border border-gray-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-800">
+              <p className="text-sm font-medium text-gray-600 dark:text-slate-300">AUC-ROC</p>
               <p className="mt-1 text-3xl font-bold text-gray-900 dark:text-slate-100">{mlAuc !== null ? `${mlAuc}%` : '—'}</p>
-              <p className="mt-1 text-xs text-gray-400 dark:text-slate-500">Discrimination ability</p>
+              <p className="mt-1 text-xs text-gray-500 dark:text-slate-400">Discrimination ability</p>
             </div>
           </div>
         </section>
@@ -238,7 +238,7 @@ export default function AnalyticsPage() {
             {/* Platform Breakdown */}
             <Card title="Platform Breakdown">
               {!data.platformBreakdown?.length ? (
-                <p className="py-4 text-center text-sm text-gray-400 dark:text-slate-500">No platform data</p>
+                <p className="py-4 text-center text-sm font-medium text-gray-600 dark:text-slate-300">No platform data</p>
               ) : (
                 <div className="space-y-4">
                   {data.platformBreakdown.map((p: any) => {
@@ -278,8 +278,8 @@ export default function AnalyticsPage() {
                       <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
                     </svg>
                   </div>
-                  <p className="text-sm text-gray-500 dark:text-slate-400">No city data available yet</p>
-                  <p className="text-xs text-gray-400 dark:text-slate-500">City data will appear as orders are processed</p>
+                  <p className="text-sm font-medium text-gray-600 dark:text-slate-300">No city data available yet</p>
+                  <p className="text-xs text-gray-500 dark:text-slate-400">City data will appear as orders are processed</p>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -349,12 +349,12 @@ export default function AnalyticsPage() {
               ].map((item) => (
                 <div key={item.title} className="rounded-xl border border-dashed border-gray-300 dark:border-slate-600 bg-gray-50 dark:bg-slate-800/50 p-6 text-center">
                   <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-gray-200 dark:bg-slate-700">
-                    <svg className="h-5 w-5 text-gray-400 dark:text-slate-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                    <svg className="h-5 w-5 text-gray-500 dark:text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
                   </div>
                   <p className="text-sm font-medium text-gray-700 dark:text-slate-300">{item.title}</p>
-                  <p className="mt-1 text-xs text-gray-400 dark:text-slate-500">{item.desc}</p>
+                  <p className="mt-1 text-xs text-gray-500 dark:text-slate-400">{item.desc}</p>
                   <span className="mt-3 inline-block rounded-full bg-blue-100 dark:bg-blue-900/30 px-2.5 py-0.5 text-xs font-medium text-blue-700 dark:text-blue-400">
                     Coming Soon
                   </span>

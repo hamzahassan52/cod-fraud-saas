@@ -196,7 +196,7 @@ export default function BlacklistPage() {
 
               <div className="max-w-xs">
                 <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
-                  Expiry (days) <span className="text-gray-400 dark:text-slate-500 font-normal">- optional</span>
+                  Expiry (days) <span className="text-gray-500 dark:text-slate-400 font-normal">- optional</span>
                 </label>
                 <input
                   type="number"
@@ -265,7 +265,7 @@ export default function BlacklistPage() {
           ) : entries.length === 0 ? (
             <div className="text-center py-16">
               <div className="w-16 h-16 bg-gray-100 dark:bg-slate-700 rounded-full flex items-center justify-center mx-auto mb-4">
-                <svg className="w-8 h-8 text-gray-400 dark:text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg className="w-8 h-8 text-gray-500 dark:text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
                 </svg>
               </div>
@@ -297,7 +297,7 @@ export default function BlacklistPage() {
                     <td className="px-4 py-3 font-mono text-sm text-gray-900 dark:text-slate-100">{entry.value}</td>
                     <td className="px-4 py-3 text-gray-600 dark:text-slate-400 text-xs">
                       {!entry.reason || entry.reason === '-' ? (
-                        <span className="text-gray-400 dark:text-slate-500">-</span>
+                        <span className="text-gray-500 dark:text-slate-400">-</span>
                       ) : entry.reason.length <= 40 ? (
                         entry.reason
                       ) : (
@@ -318,7 +318,7 @@ export default function BlacklistPage() {
                     <td className="px-4 py-3 text-xs text-gray-500 dark:text-slate-400">
                       {entry.expires_at
                         ? new Date(entry.expires_at).toLocaleDateString()
-                        : <span className="text-gray-400 dark:text-slate-500">Never</span>
+                        : <span className="text-gray-500 dark:text-slate-400">Never</span>
                       }
                     </td>
                     <td className="px-4 py-3 text-xs text-gray-500 dark:text-slate-400">

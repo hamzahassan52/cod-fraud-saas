@@ -122,7 +122,7 @@ export default function BillingPage() {
                   <span className={clsx('inline-flex items-center rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide', colors.badge)}>
                     {currentPlan} plan
                   </span>
-                  <span className="text-xs text-gray-400 dark:text-slate-500">{daysLeft}d remaining</span>
+                  <span className="text-xs text-gray-500 dark:text-slate-400">{daysLeft}d remaining</span>
                 </div>
                 <h2 className={clsx('text-4xl font-bold capitalize', colors.price)}>
                   {currentPlan}
@@ -137,7 +137,7 @@ export default function BillingPage() {
               <div className="sm:text-right">
                 <p className="text-4xl font-bold text-gray-900 dark:text-slate-100">
                   ${currentPlanData?.price ?? 0}
-                  <span className="text-base font-normal text-gray-400 dark:text-slate-500">/mo</span>
+                  <span className="text-base font-normal text-gray-500 dark:text-slate-400">/mo</span>
                 </p>
                 <p className="mt-1 text-sm text-gray-500 dark:text-slate-400">{currentPlanData?.orders} orders{currentPlanData?.unit}</p>
               </div>
@@ -157,7 +157,7 @@ export default function BillingPage() {
                   style={{ width: `${usagePercent || 0}%` }}
                 />
               </div>
-              <p className="mt-1.5 text-xs text-gray-400 dark:text-slate-500">{usagePercent.toFixed(0)}% used</p>
+              <p className="mt-1.5 text-xs text-gray-500 dark:text-slate-400">{usagePercent.toFixed(0)}% used</p>
             </div>
           </div>
         )}
@@ -200,7 +200,7 @@ export default function BillingPage() {
                       <span className={clsx('text-4xl font-extrabold', isCurrent ? c.price : 'text-gray-900 dark:text-slate-100')}>
                         ${plan.price}
                       </span>
-                      <span className="mb-1.5 text-sm text-gray-400 dark:text-slate-500">/mo</span>
+                      <span className="mb-1.5 text-sm text-gray-500 dark:text-slate-400">/mo</span>
                     </div>
                     <p className="mt-1 text-sm font-medium text-gray-500 dark:text-slate-400">
                       {plan.orders}{plan.unit} orders

@@ -269,7 +269,7 @@ export default function OrderDetailPage() {
             </h1>
             <div className="flex items-center gap-3 mt-1">
               <span className="text-sm text-gray-500 dark:text-slate-400 capitalize">{order.platform}</span>
-              <span className="text-sm text-gray-400 dark:text-slate-500">|</span>
+              <span className="text-sm text-gray-500 dark:text-slate-400">|</span>
               <span className="text-sm text-gray-500 dark:text-slate-400">
                 {new Date(order.created_at).toLocaleString()}
               </span>
@@ -484,7 +484,7 @@ export default function OrderDetailPage() {
                 {order.phone_carrier ? (
                   <Badge variant="info">{order.phone_carrier}</Badge>
                 ) : (
-                  <span className="text-sm text-gray-400 dark:text-slate-500">Unknown</span>
+                  <span className="text-sm text-gray-500 dark:text-slate-400">Unknown</span>
                 )}
               </div>
             </div>
@@ -526,7 +526,7 @@ export default function OrderDetailPage() {
                   'w-10 h-10 rounded-full flex items-center justify-center',
                   order.is_repeat_customer ? 'bg-blue-100 dark:bg-blue-900/30' : 'bg-gray-100 dark:bg-slate-700'
                 )}>
-                  <svg className={clsx('w-5 h-5', order.is_repeat_customer ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400 dark:text-slate-500')} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <svg className={clsx('w-5 h-5', order.is_repeat_customer ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-slate-400')} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                   </svg>
                 </div>
@@ -638,7 +638,7 @@ export default function OrderDetailPage() {
           {(!order.fraud_signals || order.fraud_signals.length === 0) ? (
             <div className="text-center py-8">
               <div className="w-12 h-12 bg-gray-100 dark:bg-slate-700 rounded-full flex items-center justify-center mx-auto mb-3">
-                <svg className="w-6 h-6 text-gray-400 dark:text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg className="w-6 h-6 text-gray-500 dark:text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </div>
@@ -665,7 +665,7 @@ export default function OrderDetailPage() {
                       <span className={clsx('inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold', meta.color)}>
                         {meta.label}
                       </span>
-                      <span className="text-xs text-gray-400 dark:text-slate-500">{signals.length} signal(s)</span>
+                      <span className="text-xs text-gray-500 dark:text-slate-400">{signals.length} signal(s)</span>
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
