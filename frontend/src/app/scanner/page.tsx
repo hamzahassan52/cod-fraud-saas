@@ -116,7 +116,7 @@ export default function ScannerPage() {
           <div>
             <h1 className="text-2xl font-bold text-gray-900 dark:text-slate-100">Return Scanner</h1>
             <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">
-              Physical barcode scanner se automatic returns record ho rahe hain
+              Scan returned parcels automatically — no manual input required
             </p>
           </div>
           <div className="flex items-center gap-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 px-3 py-2 rounded-lg flex-shrink-0">
@@ -167,7 +167,7 @@ export default function ScannerPage() {
                   Barcode damaged? Manual Entry
                 </p>
                 <p className="text-xs text-gray-500 dark:text-slate-400">
-                  Agar scanner barcode read na kar sake — tracking number type karo
+                  Use only when barcode is damaged or unreadable by scanner
                 </p>
               </div>
             </div>
@@ -244,9 +244,9 @@ export default function ScannerPage() {
               <svg className="w-12 h-12 text-gray-300 dark:text-slate-600 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z" />
               </svg>
-              <p className="text-sm text-gray-400 dark:text-slate-500">Koi scan nahi hua abhi tak</p>
+              <p className="text-sm text-gray-400 dark:text-slate-500">No scans yet today</p>
               <p className="text-xs text-gray-300 dark:text-slate-600 mt-1">
-                Barcode scanner se parcel scan karo ya manual entry use karo
+                Scan a returned parcel with your barcode scanner to get started
               </p>
             </div>
           ) : (
