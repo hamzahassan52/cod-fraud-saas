@@ -7,6 +7,7 @@ import { ordersApi, analyticsApi } from '@/lib/api';
 import DashboardLayout from '@/components/layout/dashboard-layout';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Modal } from '@/components/ui/modal';
 import clsx from 'clsx';
 
 interface FraudSignal {
@@ -61,6 +62,12 @@ interface Order {
   override_reason: string | null;
   override_by: string | null;
   override_at: string | null;
+  // Dispatch & delivery
+  tracking_number: string | null;
+  final_status: string;
+  call_confirmed: string | null;
+  dispatched_at: string | null;
+  returned_at: string | null;
 }
 
 function RiskBadge({ level }: { level: string }) {
@@ -121,6 +128,14 @@ export default function OrderDetailPage() {
   const [overrideAction, setOverrideAction] = useState('');
   const [overrideReason, setOverrideReason] = useState('');
   const [overrideLoading, setOverrideLoading] = useState(false);
+
+  // Dispatch modal
+  const [showDispatchModal, setShowDispatchModal] = useState(false);
+  const [trackingNumber, setTrackingNumber] = useState('');
+  const [dispatchLoading, setDispatchLoading] = useState(false);
+
+  // Call outcome
+  const [callLoading, setCallLoading] = useState(false);
 
   // Feedback
   const [feedbackLoading, setFeedbackLoading] = useState(false);
@@ -184,6 +199,33 @@ export default function OrderDetailPage() {
       alert(err.response?.data?.message || 'Feedback submission failed');
     } finally {
       setFeedbackLoading(false);
+    }
+  };
+
+  const handleDispatch = async () => {
+    if (!trackingNumber.trim()) return;
+    setDispatchLoading(true);
+    try {
+      await ordersApi.dispatch(orderId, trackingNumber.trim().toUpperCase());
+      setShowDispatchModal(false);
+      setTrackingNumber('');
+      await fetchOrder();
+    } catch (err: any) {
+      alert(err.response?.data?.error || 'Dispatch failed');
+    } finally {
+      setDispatchLoading(false);
+    }
+  };
+
+  const handleCallOutcome = async (confirmed: string) => {
+    setCallLoading(true);
+    try {
+      await ordersApi.callOutcome(orderId, confirmed);
+      await fetchOrder();
+    } catch (err: any) {
+      alert(err.response?.data?.error || 'Failed to save call outcome');
+    } finally {
+      setCallLoading(false);
     }
   };
 
@@ -279,7 +321,31 @@ export default function OrderDetailPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Dispatch button — only if not already dispatched/delivered/returned */}
+            {!['dispatched', 'delivered', 'returned'].includes(order.final_status) && (
+              <button
+                onClick={() => setShowDispatchModal(true)}
+                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                Dispatch
+              </button>
+            )}
+            {order.final_status === 'dispatched' && (
+              <span className="px-3 py-2 bg-blue-500/20 text-blue-300 text-sm font-medium rounded-lg border border-blue-500/30">
+                In Transit
+              </span>
+            )}
+            {order.final_status === 'delivered' && (
+              <span className="px-3 py-2 bg-green-500/20 text-green-300 text-sm font-medium rounded-lg border border-green-500/30">
+                Delivered
+              </span>
+            )}
+            {order.final_status === 'returned' && (
+              <span className="px-3 py-2 bg-red-500/20 text-red-300 text-sm font-medium rounded-lg border border-red-500/30">
+                Returned
+              </span>
+            )}
             <button
               onClick={() => openOverride('APPROVE')}
               className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
@@ -717,7 +783,6 @@ export default function OrderDetailPage() {
             <p className="text-sm text-gray-500 dark:text-slate-400 mb-4">
               This will override the automated recommendation for order {order.external_order_id}.
             </p>
-
             <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
               Reason (optional)
             </label>
@@ -728,7 +793,6 @@ export default function OrderDetailPage() {
               placeholder="Why are you overriding this recommendation?"
               className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
             />
-
             <div className="flex justify-end gap-3 mt-4">
               <button
                 onClick={() => setShowOverrideModal(false)}
@@ -749,6 +813,101 @@ export default function OrderDetailPage() {
                 {overrideLoading ? 'Saving...' : `Confirm ${overrideAction}`}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Dispatch Modal */}
+      {showDispatchModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/40" onClick={() => setShowDispatchModal(false)} />
+          <div className="relative bg-white dark:bg-slate-800 rounded-xl shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-slate-100 mb-1">
+              Dispatch Order
+            </h3>
+            <p className="text-sm text-gray-500 dark:text-slate-400 mb-4">
+              Enter the tracking number printed on the parcel label for order {order.external_order_id}.
+            </p>
+            <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
+              Tracking Number
+            </label>
+            <input
+              type="text"
+              value={trackingNumber}
+              onChange={e => setTrackingNumber(e.target.value.toUpperCase())}
+              onKeyDown={e => e.key === 'Enter' && handleDispatch()}
+              placeholder="TRK-XXXXXX"
+              className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+              autoFocus
+            />
+            <p className="text-xs text-gray-400 dark:text-slate-500 mt-1">
+              This number will be used by scanner to identify the parcel if it returns.
+            </p>
+            <div className="flex justify-end gap-3 mt-4">
+              <button
+                onClick={() => setShowDispatchModal(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-slate-300 bg-gray-100 dark:bg-slate-700 rounded-lg hover:bg-gray-200 dark:hover:bg-slate-600 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDispatch}
+                disabled={dispatchLoading || !trackingNumber.trim()}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {dispatchLoading ? 'Dispatching...' : 'Confirm Dispatch'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Call Outcome Card — shown when order is in VERIFY state */}
+      {order.recommendation === 'VERIFY' && !['returned', 'delivered'].includes(order.final_status) && (
+        <div className="fixed bottom-6 right-6 z-40 bg-gray-900 border border-yellow-500/40 rounded-xl shadow-2xl p-4 w-80">
+          <p className="text-sm font-semibold text-yellow-300 mb-1">Record Call Outcome</p>
+          <p className="text-xs text-gray-400 mb-3">
+            {order.call_confirmed
+              ? `Call recorded: ${order.call_confirmed.toUpperCase()}`
+              : 'Did customer confirm on call?'}
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => handleCallOutcome('yes')}
+              disabled={callLoading || order.call_confirmed === 'yes'}
+              className={clsx(
+                'flex-1 py-2 text-xs font-semibold rounded-lg transition-colors',
+                order.call_confirmed === 'yes'
+                  ? 'bg-green-600 text-white cursor-default'
+                  : 'bg-green-600/20 text-green-400 hover:bg-green-600/30 border border-green-500/30'
+              )}
+            >
+              YES
+            </button>
+            <button
+              onClick={() => handleCallOutcome('no')}
+              disabled={callLoading || order.call_confirmed === 'no'}
+              className={clsx(
+                'flex-1 py-2 text-xs font-semibold rounded-lg transition-colors',
+                order.call_confirmed === 'no'
+                  ? 'bg-red-600 text-white cursor-default'
+                  : 'bg-red-600/20 text-red-400 hover:bg-red-600/30 border border-red-500/30'
+              )}
+            >
+              NO
+            </button>
+            <button
+              onClick={() => handleCallOutcome('no_answer')}
+              disabled={callLoading || order.call_confirmed === 'no_answer'}
+              className={clsx(
+                'flex-1 py-2 text-xs font-semibold rounded-lg transition-colors',
+                order.call_confirmed === 'no_answer'
+                  ? 'bg-gray-500 text-white cursor-default'
+                  : 'bg-gray-600/20 text-gray-400 hover:bg-gray-600/30 border border-gray-500/30'
+              )}
+            >
+              N/A
+            </button>
           </div>
         </div>
       )}

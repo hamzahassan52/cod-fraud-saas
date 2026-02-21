@@ -49,6 +49,10 @@ export const ordersApi = {
     api.get(`/orders/risk/${orderId}`),
   override: (id: string, recommendation: string, reason?: string) =>
     api.post(`/orders/${id}/override`, { recommendation, reason }),
+  dispatch: (id: string, tracking_number: string) =>
+    api.post(`/orders/${id}/dispatch`, { tracking_number }),
+  callOutcome: (id: string, call_confirmed: string, notes?: string) =>
+    api.post(`/orders/${id}/call-outcome`, { call_confirmed, notes }),
 };
 
 // Blacklist
@@ -71,6 +75,16 @@ export const mlApi = {
   health: () => api.get('/ml/health'),
   performanceHistory: () => api.get('/ml/performance-history'),
   generateSnapshot: () => api.post('/ml/generate-snapshot'),
+  trainingStats: () => api.get('/ml/training-stats'),
+  retrainJobs: () => api.get('/ml/retrain-jobs'),
+};
+
+// Scanner
+export const scannerApi = {
+  scan: (tracking_number: string) =>
+    api.post('/scanner/scan', { tracking_number }),
+  lookup: (tracking_number: string) =>
+    api.get(`/scanner/lookup/${tracking_number}`),
 };
 
 // Analytics

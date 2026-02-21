@@ -38,6 +38,15 @@ async function migrate() {
         const alterStatements = [
           `ALTER TABLE orders ADD COLUMN IF NOT EXISTS recommendation_reasons JSONB DEFAULT '[]'`,
           `ALTER TABLE orders ADD COLUMN IF NOT EXISTS risk_summary TEXT`,
+          // Dispatch & delivery tracking
+          `ALTER TABLE orders ADD COLUMN IF NOT EXISTS tracking_number VARCHAR(100)`,
+          `ALTER TABLE orders ADD COLUMN IF NOT EXISTS final_status VARCHAR(20) DEFAULT 'pending'`,
+          `ALTER TABLE orders ADD COLUMN IF NOT EXISTS call_confirmed VARCHAR(20)`,
+          `ALTER TABLE orders ADD COLUMN IF NOT EXISTS dispatched_at TIMESTAMP WITH TIME ZONE`,
+          `ALTER TABLE orders ADD COLUMN IF NOT EXISTS returned_at TIMESTAMP WITH TIME ZONE`,
+          // Unique index for tracking_number (only if not exists)
+          `CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_tracking_unique ON orders(tracking_number) WHERE tracking_number IS NOT NULL`,
+          `CREATE INDEX IF NOT EXISTS idx_orders_final_status ON orders(tenant_id, final_status, created_at DESC)`,
         ];
 
         for (const stmt of alterStatements) {
@@ -100,6 +109,54 @@ async function migrate() {
             installed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
             UNIQUE(tenant_id),
             UNIQUE(shop)
+          )
+        `);
+
+        // ML self-learning: training events (immutable outcome dataset)
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS training_events (
+            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+            tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+            order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+            feature_snapshot JSONB NOT NULL,
+            final_label SMALLINT NOT NULL CHECK (final_label IN (0, 1)),
+            call_confirmed VARCHAR(20),
+            model_version VARCHAR(50),
+            prediction_score DECIMAL(6,5),
+            prediction_correct BOOLEAN,
+            outcome_source VARCHAR(20) NOT NULL DEFAULT 'scanner',
+            used_in_training BOOLEAN NOT NULL DEFAULT FALSE,
+            retrain_job_id UUID,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            UNIQUE(order_id)
+          )
+        `);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_training_events_tenant ON training_events(tenant_id)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_training_events_unused ON training_events(tenant_id, used_in_training, created_at) WHERE used_in_training = FALSE`);
+
+        // ML retraining job history
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS retrain_jobs (
+            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+            triggered_by VARCHAR(30) NOT NULL,
+            status VARCHAR(20) NOT NULL DEFAULT 'pending',
+            total_events INT,
+            new_events_count INT,
+            class_0_count INT,
+            class_1_count INT,
+            previous_model_version VARCHAR(50),
+            new_model_version VARCHAR(50),
+            previous_f1 DECIMAL(6,5),
+            new_f1 DECIMAL(6,5),
+            previous_auc DECIMAL(6,5),
+            new_auc DECIMAL(6,5),
+            promoted BOOLEAN,
+            promotion_reason TEXT,
+            rejection_reason TEXT,
+            started_at TIMESTAMP WITH TIME ZONE,
+            completed_at TIMESTAMP WITH TIME ZONE,
+            error_message TEXT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
           )
         `);
 

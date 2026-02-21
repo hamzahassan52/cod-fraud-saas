@@ -5,6 +5,7 @@ import axios from 'axios';
 import { config } from '../config';
 import { cacheGetOrSet } from '../services/cache/redis';
 import { generateWeeklySnapshot } from '../services/performance-tracker';
+import { getTrainingStats } from '../services/training/training-events';
 
 /**
  * ML Model Transparency API
@@ -240,5 +241,38 @@ export async function mlRoutes(app: FastifyInstance): Promise<void> {
     } catch {
       return reply.code(503).send({ mlService: 'down', error: 'ML service unreachable' });
     }
+  });
+
+  // GET /ml/training-stats - Real-world training data progress
+  // Shows how many real labeled outcomes exist vs threshold needed for retraining
+  app.get('/training-stats', async (request: FastifyRequest, reply: FastifyReply) => {
+    const tenantId = request.tenantId!;
+    const stats = await getTrainingStats(tenantId);
+
+    // Get last retrain job info
+    const lastRetrain = await query(
+      `SELECT status, new_model_version, new_f1, promoted, completed_at, triggered_by
+       FROM retrain_jobs
+       ORDER BY created_at DESC LIMIT 1`
+    );
+
+    return reply.send({
+      ...stats,
+      last_retrain: lastRetrain.rows[0] || null,
+    });
+  });
+
+  // GET /ml/retrain-jobs - Retraining history
+  app.get('/retrain-jobs', async (_request: FastifyRequest, reply: FastifyReply) => {
+    const result = await query(
+      `SELECT id, triggered_by, status, total_events, new_events_count,
+              class_0_count, class_1_count, previous_model_version, new_model_version,
+              previous_f1, new_f1, promoted, promotion_reason, rejection_reason,
+              started_at, completed_at, error_message, created_at
+       FROM retrain_jobs
+       ORDER BY created_at DESC
+       LIMIT 20`
+    );
+    return reply.send({ jobs: result.rows });
   });
 }

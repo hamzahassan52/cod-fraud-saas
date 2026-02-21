@@ -126,6 +126,15 @@ CREATE TABLE orders (
     override_by UUID REFERENCES users(id),
     override_at TIMESTAMP WITH TIME ZONE,
 
+    -- Dispatch & delivery tracking
+    tracking_number VARCHAR(100) UNIQUE,
+    final_status VARCHAR(20) DEFAULT 'pending',
+    -- pending | dispatched | delivered | returned
+    call_confirmed VARCHAR(20),
+    -- yes | no | no_answer | not_required
+    dispatched_at TIMESTAMP WITH TIME ZONE,
+    returned_at TIMESTAMP WITH TIME ZONE,
+
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     UNIQUE(tenant_id, external_order_id, platform)
@@ -141,6 +150,8 @@ CREATE INDEX idx_orders_created ON orders(created_at DESC);
 CREATE INDEX idx_orders_tenant_created ON orders(tenant_id, created_at DESC);
 CREATE INDEX idx_orders_customer_email ON orders(customer_email);
 CREATE INDEX idx_orders_shipping_city ON orders(shipping_city);
+CREATE INDEX idx_orders_tracking ON orders(tracking_number) WHERE tracking_number IS NOT NULL;
+CREATE INDEX idx_orders_final_status ON orders(tenant_id, final_status, created_at DESC);
 
 -- ============================================
 -- PHONES (Phone intelligence)
@@ -431,3 +442,91 @@ CREATE TABLE IF NOT EXISTS shopify_connections (
 
 CREATE INDEX idx_shopify_connections_tenant ON shopify_connections(tenant_id);
 CREATE INDEX idx_shopify_connections_shop ON shopify_connections(shop);
+
+-- ============================================
+-- TRAINING EVENTS (ML self-learning dataset)
+-- Immutable. Written once per order when final
+-- delivery outcome is confirmed.
+-- Never updated — only appended.
+-- ============================================
+CREATE TABLE IF NOT EXISTS training_events (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+
+    -- Exact 48 features used by model at prediction time
+    -- Snapshot from fraud_scores.ml_features — never recalculated
+    feature_snapshot JSONB NOT NULL,
+
+    -- Ground truth label
+    final_label SMALLINT NOT NULL CHECK (final_label IN (0, 1)),
+    -- 0 = delivered (good customer), 1 = returned (RTO/fraud)
+
+    -- Call outcome at time of verification (feature, not label)
+    call_confirmed VARCHAR(20),
+    -- yes | no | no_answer | not_required | null (not verified)
+
+    -- Model context at prediction time
+    model_version VARCHAR(50),
+    prediction_score DECIMAL(6,5),
+    -- model's fraud probability at scoring time
+    prediction_correct BOOLEAN,
+    -- was model's prediction correct?
+
+    -- How was this outcome recorded?
+    outcome_source VARCHAR(20) NOT NULL DEFAULT 'scanner',
+    -- scanner | manual | auto_cron
+
+    -- Has this event been used in a retraining run?
+    used_in_training BOOLEAN NOT NULL DEFAULT FALSE,
+    retrain_job_id UUID,
+
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+
+    UNIQUE(order_id)
+    -- One training event per order — enforced at DB level
+);
+
+CREATE INDEX idx_training_events_tenant ON training_events(tenant_id);
+CREATE INDEX idx_training_events_unused ON training_events(tenant_id, used_in_training, created_at)
+    WHERE used_in_training = FALSE;
+CREATE INDEX idx_training_events_label ON training_events(tenant_id, final_label, created_at DESC);
+
+-- ============================================
+-- RETRAIN JOBS (ML retraining audit trail)
+-- ============================================
+CREATE TABLE IF NOT EXISTS retrain_jobs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+
+    triggered_by VARCHAR(30) NOT NULL,
+    -- threshold_500 | scheduled_weekly | drift_detected | manual
+
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    -- pending | running | completed | failed | skipped
+
+    -- Dataset stats
+    total_events INT,
+    new_events_count INT,
+    class_0_count INT,   -- delivered samples
+    class_1_count INT,   -- returned samples
+
+    -- Model comparison
+    previous_model_version VARCHAR(50),
+    new_model_version VARCHAR(50),
+    previous_f1 DECIMAL(6,5),
+    new_f1 DECIMAL(6,5),
+    previous_auc DECIMAL(6,5),
+    new_auc DECIMAL(6,5),
+
+    -- Decision
+    promoted BOOLEAN,
+    promotion_reason TEXT,
+    rejection_reason TEXT,
+
+    -- Timing
+    started_at TIMESTAMP WITH TIME ZONE,
+    completed_at TIMESTAMP WITH TIME ZONE,
+    error_message TEXT,
+
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);

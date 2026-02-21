@@ -220,4 +220,85 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
       return reply.send({ success: true, recommendation, previousRecommendation: prev.rows[0].recommendation });
     }
   );
+
+  // POST /orders/:id/call-outcome — Save agent call result after verification call
+  // Called when agent calls customer and records yes/no/no_answer
+  app.post<{ Params: { id: string }; Body: { call_confirmed: string; notes?: string } }>(
+    '/:id/call-outcome',
+    async (request, reply) => {
+      const { id } = request.params;
+      const { call_confirmed, notes } = request.body as any;
+      const tenantId = request.tenantId!;
+
+      if (!['yes', 'no', 'no_answer'].includes(call_confirmed)) {
+        return reply.code(400).send({ error: 'call_confirmed must be yes, no, or no_answer' });
+      }
+
+      const order = await query(
+        'SELECT id, status, recommendation FROM orders WHERE id = $1 AND tenant_id = $2',
+        [id, tenantId]
+      );
+      if (order.rows.length === 0) return reply.code(404).send({ error: 'Order not found' });
+
+      await query(
+        `UPDATE orders SET call_confirmed = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
+        [call_confirmed, id, tenantId]
+      );
+
+      await query(
+        `INSERT INTO risk_logs (tenant_id, order_id, action, actor_type, actor_id, new_state)
+         VALUES ($1, $2, 'call_recorded', 'user', $3, $4)`,
+        [tenantId, id, request.userId, JSON.stringify({ call_confirmed, notes })]
+      );
+
+      return reply.send({ success: true, call_confirmed });
+    }
+  );
+
+  // POST /orders/:id/dispatch — Mark order as dispatched, assign tracking number
+  app.post<{ Params: { id: string }; Body: { tracking_number: string } }>(
+    '/:id/dispatch',
+    async (request, reply) => {
+      const { id } = request.params;
+      const { tracking_number } = request.body as any;
+      const tenantId = request.tenantId!;
+
+      if (!tracking_number?.trim()) {
+        return reply.code(400).send({ error: 'tracking_number is required' });
+      }
+
+      const order = await query(
+        'SELECT id, final_status, customer_name FROM orders WHERE id = $1 AND tenant_id = $2',
+        [id, tenantId]
+      );
+      if (order.rows.length === 0) return reply.code(404).send({ error: 'Order not found' });
+
+      if (order.rows[0].final_status === 'returned') {
+        return reply.code(400).send({ error: 'Cannot dispatch a returned order' });
+      }
+
+      await query(
+        `UPDATE orders SET
+           tracking_number = $1,
+           final_status = 'dispatched',
+           dispatched_at = NOW(),
+           status = 'approved',
+           updated_at = NOW()
+         WHERE id = $2 AND tenant_id = $3`,
+        [tracking_number.trim(), id, tenantId]
+      );
+
+      await query(
+        `INSERT INTO risk_logs (tenant_id, order_id, action, actor_type, actor_id, new_state)
+         VALUES ($1, $2, 'dispatched', 'user', $3, $4)`,
+        [tenantId, id, request.userId, JSON.stringify({ tracking_number: tracking_number.trim() })]
+      );
+
+      return reply.send({
+        success: true,
+        tracking_number: tracking_number.trim(),
+        final_status: 'dispatched',
+      });
+    }
+  );
 }

@@ -4,6 +4,7 @@ import { startScoringWorker } from './services/queue/scoring-queue';
 import { closePool } from './db/connection';
 import { closeRedis } from './services/cache/redis';
 import { generateAllSnapshots } from './services/performance-tracker';
+import { runAutoDeliveredCron } from './services/cron/auto-delivered';
 
 async function main() {
   const app = await buildApp();
@@ -32,11 +33,8 @@ async function main() {
   }
 
   // Weekly performance snapshot cron (every Sunday at midnight)
-  // 7 days = 604_800_000 ms
-  const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
   const snapshotInterval = setInterval(async () => {
     const now = new Date();
-    // Only run on Sundays (day 0)
     if (now.getUTCDay() === 0 && now.getUTCHours() === 0) {
       console.log('Running weekly performance snapshot generation...');
       try {
@@ -49,10 +47,25 @@ async function main() {
   }, 60 * 60 * 1000); // Check every hour
   console.log('Weekly performance snapshot cron scheduled');
 
+  // Nightly auto-delivered cron (runs at 2:00 AM UTC every day)
+  // Orders dispatched 7+ days ago with no return scan → marked as delivered
+  const autoDeliveredInterval = setInterval(async () => {
+    const now = new Date();
+    if (now.getUTCHours() === 2 && now.getUTCMinutes() < 5) {
+      try {
+        await runAutoDeliveredCron();
+      } catch (err) {
+        console.error('Auto-delivered cron failed:', err);
+      }
+    }
+  }, 5 * 60 * 1000); // Check every 5 minutes
+  console.log('Auto-delivered cron scheduled (runs nightly at 2:00 AM UTC)');
+
   // Graceful shutdown
   const shutdown = async (signal: string) => {
     console.log(`\n${signal} received. Shutting down gracefully...`);
     clearInterval(snapshotInterval);
+    clearInterval(autoDeliveredInterval);
     await worker.close();
     await app.close();
     await closeRedis();

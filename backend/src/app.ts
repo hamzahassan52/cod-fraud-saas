@@ -13,6 +13,7 @@ import { analyticsRoutes } from './routes/analytics.routes';
 import { healthRoutes } from './routes/health.routes';
 import { mlRoutes } from './routes/ml.routes';
 import { shopifyRoutes } from './routes/shopify.routes';
+import { scannerRoutes } from './routes/scanner.routes';
 
 // Middleware
 import { requestIdPlugin } from './middlewares/request-id';
@@ -90,6 +91,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(analyticsRoutes, { prefix: '/api/v1/analytics' });
   await app.register(mlRoutes, { prefix: '/api/v1/ml' });
   await app.register(shopifyRoutes, { prefix: '/api/v1/shopify' });
+  await app.register(scannerRoutes, { prefix: '/api/v1/scanner' });
 
   // ---- Global Error Handler ----
   app.setErrorHandler((error, request, reply) => {
