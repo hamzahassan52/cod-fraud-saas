@@ -96,7 +96,7 @@ Each account has 100 realistic orders for its niche. Shopify connected. Use for 
 - If no `models/latest.joblib` found at startup, `startup.sh` trains once with 30K synthetic samples as fallback
 - Backend CORS uses `CORS_ORIGINS` env var in production, `true` in development
 - **DO NOT use Railway internal networking** (`*.railway.internal`) — it's unreliable, use public URLs
-- Vercel auto-deploy from GitHub can disconnect — if broken, deploy manually: `vercel --prod --yes` from repo root (not frontend dir). `.vercel/project.json` must exist at root.
+- Vercel auto-deploy: project is `cod-fraud-saas`, root directory = `frontend`, GitHub connected via Dashboard (not CLI). If auto-deploy breaks, deploy manually: `npx vercel --prod --yes` from repo root. `.vercel/project.json` must exist at both root AND `frontend/`. If GitHub check shows "Canceled from Vercel Dashboard", go to Vercel Dashboard → Project Settings → Git → disconnect + reconnect repo.
 
 ## Project Structure
 ```
@@ -225,7 +225,7 @@ cod-fraud-saas/
 - **Fraud Engine**: 3-layer architecture — Rule-based (30%) + Statistical (30%) + ML/XGBoost (40%)
 - **48 ML Features**: Aligned between backend `ml-client/index.ts:toMLFeatures()` and ML model via `pipeline/feature_map.py`. 4 groups: A_static_order, B_behavioral_velocity, C_contextual_seasonal, D_derived_interaction
 - **REQUIRED_FEATURES**: `[order_amount, is_cod, order_hour]` — inference refused without these
-- **ML Ensemble**: XGBoost (15 iter, 3-fold CV, scale_pos_weight) + LightGBM (10 iter, 3-fold CV, class_weight='balanced') → soft-voting VotingClassifier
+- **ML Ensemble**: XGBoost (30 iter, 5-fold CV, scale_pos_weight) + LightGBM (20 iter, 5-fold CV, class_weight='balanced') + CatBoost (15 iter, 5-fold CV) → soft-voting VotingClassifier
 - **Probability Calibration**: `CalibratedClassifierCV(ensemble, cv='prefit', method='isotonic')` on validation set
 - **Threshold Optimization**: `find_optimal_threshold()` on val set via precision_recall_curve → maximize F1 (not default 0.5)
 - **Offline Training Workflow**: Run `python scripts/train_offline.py` locally → commit `models/latest.joblib` → Railway loads it instantly. MIN_REAL_ORDERS = 3000 before switching to real/hybrid mode.
@@ -304,15 +304,17 @@ cod-fraud-saas/
 - `GET /metrics` — Prometheus metrics
 
 ## ML Model
-- **Algorithm**: XGBoost + LightGBM soft-voting ensemble with RandomizedSearchCV (15 iter XGB + 10 iter LGB, 3-fold CV each), then `CalibratedClassifierCV(isotonic)` on validation set
+- **Algorithm**: XGBoost + LightGBM + CatBoost soft-voting ensemble with RandomizedSearchCV (30 iter XGB + 20 iter LGB + 15 iter CatBoost, 5-fold CV each), then `CalibratedClassifierCV(isotonic)` on validation set
+- **Current metrics**: Accuracy 85.7%, F1 83.3%, AUC-ROC 93.1%, Optimal Threshold 0.4333
+- **Training samples**: 50K synthetic (stratified 60/20/20 train/val/test split)
 - **Features**: 48 features in 4 groups — A_static_order (order/discount/timing), B_behavioral_velocity (customer history/velocity/account age), C_contextual_seasonal (city rates, Eid/Ramadan/sale periods), D_derived_interaction (combined signals)
 - **Pakistan-specific signals**: `is_eid_period` (months 4,6,7), `is_ramadan` (months 3,4), `is_sale_period` (11.11/12.12/Black Friday), `orders_last_1h` (flash fraud detection)
 - **Threshold**: Optimized via `precision_recall_curve` on validation set (maximize F1) — stored as `optimal_threshold` in model metadata, not hardcoded 0.5
-- **Training data**: 30K synthetic samples (Pakistan COD-specific patterns) — real data transition at 3000+ labeled orders
+- **Training data**: 50K synthetic samples (Pakistan COD-specific patterns) — real data transition at 3000+ labeled orders
 - **Training workflow**: OFFLINE — run `scripts/train_offline.py` locally, commit `models/latest.joblib`, Railway loads it at startup
 - **Drift detection**: KS test + mean shift on feature distributions
 - **Feature name alignment**: Backend `toMLFeatures()` MUST match `pipeline/feature_map.py` EXACTLY — both have 48 features
-- **Class imbalance**: No SMOTE — uses `scale_pos_weight` (XGBoost) and `class_weight='balanced'` (LightGBM)
+- **Class imbalance**: No SMOTE — uses `scale_pos_weight` (XGBoost), `class_weight='balanced'` (LightGBM), `auto_class_weights='Balanced'` (CatBoost)
 - **Memory safety**: `n_jobs=2` for training, `--workers 1` for uvicorn (Railway memory limits)
 
 ## Frontend Pages (Navigation Order)
@@ -365,7 +367,7 @@ cd backend && npm run typecheck     # Type check only
 cd ml-service && uvicorn app:app --port 8000           # Run server
 
 # Offline training (run locally, then commit models/)
-python scripts/train_offline.py --mode synthetic --samples 30000  # Train on 30K synthetic data
+python scripts/train_offline.py --mode synthetic --samples 50000  # Train on 50K synthetic data (recommended)
 python scripts/train_offline.py --mode real                       # Train on real DB data (needs 3000+ orders)
 python scripts/train_offline.py --mode hybrid                     # Train on synthetic + real combined
 python scripts/train_offline.py --check-real-data                 # Check if enough real data exists
@@ -403,15 +405,19 @@ vercel --prod --yes   # run from repo root (not frontend dir)
 
 ## Known Fixed Issues (Don't Re-Introduce)
 - BullMQ Redis must include password from URL (`scoring-queue.ts` line 13-18)
-- **ML Dockerfile must NOT train** — training was removed to avoid build timeouts (100K samples + SMOTE + CV = 25+ min timeout). Training is now done offline via `scripts/train_offline.py`, model committed to `models/`
-- **No SMOTE** — removed because it caused build timeouts and memory issues. Use `scale_pos_weight` (XGB) + `class_weight='balanced'` (LGB) instead
+- **ML Dockerfile must NOT train** — training was removed to avoid build timeouts. Training is now done offline via `scripts/train_offline.py`, model committed to `models/`
+- **No SMOTE** — removed because it caused build timeouts and memory issues. Use `scale_pos_weight` (XGB) + `class_weight='balanced'` (LGB) + `auto_class_weights='Balanced'` (CatBoost) instead
 - Migration must be non-fatal (exits 0 even on failure, 5 retries)
 - Backend CORS must use `CORS_ORIGINS` env var in production
 - `shap` package commented out in requirements.txt (requires cmake, fails in CI)
 - External order lookup (`/orders/external/:platform/:id`) uses `o.risk_score, o.risk_level, o.recommendation` from orders table — NOT from fraud_scores table (those columns don't exist on fraud_scores)
 - Fraud signal field from analytics API is `signal_name` (not `signal` or `signal_type`)
 - Vercel deploy must be run from repo root with `.vercel/project.json` present — not from `frontend/` directory
-- VotingClassifier does NOT have `feature_importances_` directly — must access via `model.estimators_[0].feature_importances_` and `model.estimators_[1].feature_importances_`
+- VotingClassifier does NOT have `feature_importances_` directly — must average across `model.estimators_` (np.mean of all estimators' feature_importances_)
+- **CI feature count assertion is 48** (not 35) — `assert len(FEATURE_NAMES) == 48` in `.github/workflows/ci.yml`
+- **`/api/v1/ml/metrics` response structure**: returns `{ active, model_info: {version, model_type, trained_at, training_samples, feature_count}, performance: {accuracy, precision, recall, f1_score, auc_roc}, feature_importance: [{feature, importance}] }`. Frontend reads `mlMetrics.performance.accuracy`, `mlMetrics.model_info.version` etc. — NOT flat top-level keys
+- **`/api/v1/ml/metrics` DB fallback**: if `model_versions` table is empty, falls back to calling ML service `/model/info` directly — so metrics always show even without DB entry
+- **`/api/v1/ml/confusion-matrix` response**: flat fields `{true_positives, true_negatives, false_positives, false_negatives, total}` — not nested under `confusionMatrix` object
 
 ## Shopify Extension Setup (Pending)
 The `shopify-extension/` directory is ready but needs:
