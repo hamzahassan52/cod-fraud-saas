@@ -6,6 +6,7 @@ import { Sidebar } from './sidebar';
 import { Topbar } from './Topbar';
 import { ScanToast, ScanToastData } from '@/components/ui/scan-toast';
 import { useGlobalScanner } from '@/hooks/use-global-scanner';
+import { useScanHistory } from '@/context/scan-history-context';
 import { scannerApi } from '@/lib/api';
 import clsx from 'clsx';
 
@@ -19,6 +20,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
   const [toasts, setToasts] = useState<ScanToastData[]>([]);
+  const { addRecord } = useScanHistory();
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -47,24 +49,34 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     try {
       const res = await scannerApi.scan(trackingNumber);
       const data = res.data;
+      const status = data.result === 'marked_returned' ? 'returned'
+                   : data.result === 'already_processed' ? 'already_done'
+                   : 'not_found';
 
       setToasts(prev => prev.map(t => t.id !== id ? t : {
-        id,
-        trackingNumber,
-        status: data.result === 'marked_returned' ? 'returned'
-              : data.result === 'already_processed' ? 'already_done'
-              : 'not_found',
+        id, trackingNumber, status,
         customerName: data.order?.customer_name,
         externalOrderId: data.order?.external_order_id,
         riskScore: data.order?.risk_score,
         riskLevel: data.order?.risk_level,
       }));
+
+      addRecord({
+        id, trackingNumber, status,
+        customerName: data.order?.customer_name,
+        externalOrderId: data.order?.external_order_id,
+        riskScore: data.order?.risk_score,
+        riskLevel: data.order?.risk_level,
+        time: new Date().toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' }),
+      });
     } catch {
       setToasts(prev => prev.map(t => t.id !== id ? t : {
-        id,
-        trackingNumber,
-        status: 'not_found',
+        id, trackingNumber, status: 'not_found',
       }));
+      addRecord({
+        id, trackingNumber, status: 'not_found',
+        time: new Date().toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' }),
+      });
     }
   }, []);
 

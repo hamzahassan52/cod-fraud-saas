@@ -31,7 +31,7 @@ export function ScanToast({ toasts, onDismiss }: ScanToastProps) {
 function ToastItem({ toast, onDismiss }: { toast: ScanToastData; onDismiss: (id: number) => void }) {
   useEffect(() => {
     if (toast.status === 'loading') return;
-    const t = setTimeout(() => onDismiss(toast.id), 4000);
+    const t = setTimeout(() => onDismiss(toast.id), 2500);
     return () => clearTimeout(t);
   }, [toast.status, toast.id, onDismiss]);
 

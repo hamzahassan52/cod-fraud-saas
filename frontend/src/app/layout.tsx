@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 import { ThemeProvider } from '@/context/ThemeProvider';
 import { StoreProvider } from '@/context/StoreContext';
+import { ScanHistoryProvider } from '@/context/scan-history-context';
 
 export const metadata: Metadata = {
   title: 'COD Fraud Shield - Revenue Protection Control Center',
@@ -14,7 +15,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <ThemeProvider>
           <StoreProvider>
-            {children}
+            <ScanHistoryProvider>
+              {children}
+            </ScanHistoryProvider>
           </StoreProvider>
         </ThemeProvider>
       </body>
