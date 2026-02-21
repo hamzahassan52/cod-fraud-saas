@@ -67,59 +67,64 @@ export default function LoginPage() {
     <div className="flex min-h-screen bg-white dark:bg-slate-900">
 
       {/* Left panel — branding (hidden on mobile) */}
-      <div className="hidden lg:flex lg:w-[52%] xl:w-[55%] flex-col justify-between bg-slate-900 px-12 py-10 relative overflow-hidden">
+      <div className="hidden lg:flex lg:w-[52%] xl:w-[55%] flex-col items-center justify-center bg-slate-900 px-14 py-12 relative overflow-hidden">
         {/* Background decoration */}
         <div className="pointer-events-none absolute inset-0">
           <div className="absolute -left-32 -top-32 h-96 w-96 rounded-full bg-blue-600/10" />
           <div className="absolute -bottom-24 -right-24 h-80 w-80 rounded-full bg-blue-500/8" />
-          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-[500px] w-[500px] rounded-full bg-blue-600/5" />
+          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-[600px] w-[600px] rounded-full bg-blue-600/5" />
         </div>
 
-        {/* Top: Logo */}
-        <div className="relative flex items-center gap-3">
-          <ShieldLogo size={36} />
-          <span className="text-lg font-bold text-white tracking-tight">COD Fraud Shield</span>
-        </div>
+        <div className="relative w-full max-w-md space-y-10">
+          {/* Logo + Brand */}
+          <div className="flex items-center gap-4">
+            <ShieldLogo size={52} />
+            <div>
+              <p className="text-xl font-bold text-white tracking-tight">COD Fraud Shield</p>
+              <p className="text-sm text-slate-500">Pakistan's #1 fraud protection</p>
+            </div>
+          </div>
 
-        {/* Middle: Headline + Features */}
-        <div className="relative space-y-8">
+          {/* Headline */}
           <div>
-            <h2 className="text-4xl font-bold text-white leading-tight">
+            <h2 className="text-5xl font-extrabold text-white leading-[1.1] tracking-tight xl:text-6xl">
               Stop COD fraud<br />
-              <span className="text-blue-400">before it costs you.</span>
+              <span className="text-blue-400">before it costs</span><br />
+              <span className="text-blue-400">you.</span>
             </h2>
-            <p className="mt-4 text-base text-slate-400 leading-relaxed max-w-sm">
+            <p className="mt-5 text-lg text-slate-400 leading-relaxed">
               AI-powered risk scoring built specifically for Pakistan's Cash-on-Delivery market. Block bad orders, protect revenue.
             </p>
           </div>
 
-          <div className="space-y-4">
+          {/* Features */}
+          <div className="space-y-5">
             {features.map((f) => (
-              <div key={f.title} className="flex items-start gap-4">
-                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-slate-800 text-xl">
+              <div key={f.title} className="flex items-center gap-4">
+                <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl bg-slate-800 text-2xl">
                   {f.icon}
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-white">{f.title}</p>
-                  <p className="text-xs text-slate-500 mt-0.5">{f.desc}</p>
+                  <p className="text-base font-semibold text-white">{f.title}</p>
+                  <p className="text-sm text-slate-500 mt-0.5">{f.desc}</p>
                 </div>
               </div>
             ))}
           </div>
-        </div>
 
-        {/* Bottom: Trust indicator */}
-        <div className="relative flex items-center gap-3">
-          <div className="flex -space-x-2">
-            {['M', 'A', 'S', 'R'].map((l) => (
-              <div key={l} className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-slate-900 bg-gradient-to-br from-blue-500 to-blue-700 text-xs font-semibold text-white">
-                {l}
-              </div>
-            ))}
-          </div>
-          <div>
-            <p className="text-sm font-medium text-white">Trusted by COD businesses</p>
-            <p className="text-xs text-slate-500">Across Pakistan</p>
+          {/* Trust indicator */}
+          <div className="flex items-center gap-3 pt-2">
+            <div className="flex -space-x-2">
+              {['M', 'A', 'S', 'R'].map((l) => (
+                <div key={l} className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-slate-900 bg-gradient-to-br from-blue-500 to-blue-700 text-xs font-bold text-white">
+                  {l}
+                </div>
+              ))}
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-white">Trusted by COD businesses</p>
+              <p className="text-xs text-slate-500">Across Pakistan</p>
+            </div>
           </div>
         </div>
       </div>
