@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Training pipeline for the COD Fraud Detection XGBoost model.
+Training pipeline for the COD Fraud Detection ensemble model.
 
 Can be executed standalone::
 
@@ -8,11 +8,13 @@ Can be executed standalone::
     python train.py --csv data/training_data.csv   # train from CSV
 
 The script will:
-  1. Fetch / load labelled order data.
-  2. Engineer the 35 features (32 base + 3 interaction features).
-  3. Train an XGBoost classifier with expanded hyper-parameter search.
-  4. Evaluate via 10-fold cross-validation.
-  5. Save the model + metadata under ``versions/``.
+  1. Fetch / load labelled order data (48 features).
+  2. Engineer interaction + v3 features.
+  3. Apply SMOTE to balance RTO vs delivered classes.
+  4. Train XGBoost + LightGBM with hyperparameter search (5-fold CV).
+  5. Combine into a soft-voting ensemble for improved accuracy.
+  6. Evaluate on held-out test set.
+  7. Save the ensemble + metadata under ``versions/``.
 """
 
 from __future__ import annotations
@@ -29,6 +31,9 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
+from imblearn.over_sampling import SMOTE
+from lightgbm import LGBMClassifier
+from sklearn.ensemble import VotingClassifier
 from sklearn.metrics import (
     accuracy_score,
     f1_score,
@@ -52,8 +57,10 @@ logging.basicConfig(
 logger = logging.getLogger("train")
 
 # ---------------------------------------------------------------------------
-# The canonical 35 features (32 base + 3 interaction features).
-# Order matters -- we sort alphabetically for determinism.
+# The canonical 48 features — sorted alphabetically for determinism.
+# v1: 35 base features
+# v2: +7 velocity/account-age features
+# v3: +6 seasonal/behavioral/discount features
 # ---------------------------------------------------------------------------
 FEATURE_NAMES: List[str] = sorted([
     "order_amount",
@@ -92,6 +99,21 @@ FEATURE_NAMES: List[str] = sorted([
     "cod_first_order",
     "high_value_cod_first",
     "phone_risk_score",
+    # v2: velocity + value anomaly + account-age signals
+    "orders_last_24h",
+    "orders_last_7d",
+    "customer_lifetime_value",
+    "amount_vs_customer_avg",
+    "is_new_account",
+    "new_account_high_value",
+    "new_account_cod",
+    # v3: seasonal + behavioral + discount signals
+    "orders_last_1h",
+    "is_eid_period",
+    "is_ramadan",
+    "is_sale_period",
+    "is_high_discount",
+    "avg_days_between_orders",
 ])
 
 
@@ -244,14 +266,21 @@ def train_model(
     test_size: float = 0.2,
     min_samples: int = 100,
     temporal: bool = False,
-) -> Tuple[XGBClassifier, Dict[str, float], List[str], int]:
-    """Train an XGBoost classifier and return (model, metrics, feature_names, n_samples).
+) -> Tuple[Any, Dict[str, float], List[str], int]:
+    """Train an XGBoost + LightGBM soft-voting ensemble and return (model, metrics, feature_names, n_samples).
+
+    Pipeline:
+        1. Optional temporal or random train/test split.
+        2. SMOTE oversampling to balance RTO vs delivered classes.
+        3. XGBoost RandomizedSearchCV (30 iter, 5-fold).
+        4. LightGBM RandomizedSearchCV (25 iter, 5-fold).
+        5. Soft-voting VotingClassifier fitted on SMOTE'd data.
+        6. Evaluation on original (non-SMOTE) test set.
 
     Parameters
     ----------
     temporal : bool
         If True, split by time (first 80% train, last 20% test) to avoid data leakage.
-        Requires a time-sortable column (``created_at``, ``order_date``, etc.).
 
     Raises
     ------
@@ -303,16 +332,29 @@ def train_model(
         )
     logger.info("Train: %d | Test: %d", len(X_train), len(X_test))
 
-    # --- Hyper-parameter grid search (expanded) -------------------------
-    base_params = {
+    # --- SMOTE: oversample minority class to balance train set ----------
+    logger.info(
+        "Applying SMOTE (before: %d pos=RTO, %d neg=delivered) ...",
+        n_positive, n_negative,
+    )
+    k_neighbors = min(5, max(1, n_positive - 1))
+    smote = SMOTE(random_state=42, k_neighbors=k_neighbors)
+    X_train_sm, y_train_sm = smote.fit_resample(X_train, y_train)
+    n_pos_sm = int(y_train_sm.sum())
+    logger.info(
+        "After SMOTE: %d samples (%d pos, %d neg)",
+        len(X_train_sm), n_pos_sm, len(X_train_sm) - n_pos_sm,
+    )
+
+    # --- XGBoost hyperparameter search ----------------------------------
+    xgb_base = {
         "objective": "binary:logistic",
         "eval_metric": "logloss",
         "use_label_encoder": False,
         "random_state": 42,
         "n_jobs": -1,
     }
-
-    param_grid = {
+    xgb_param_grid = {
         "n_estimators": [100, 200, 300, 500],
         "max_depth": [3, 4, 5, 6, 8],
         "learning_rate": [0.01, 0.05, 0.1],
@@ -322,28 +364,68 @@ def train_model(
         "gamma": [0, 0.1, 0.2],
         "reg_alpha": [0, 0.01, 0.1],
         "reg_lambda": [1, 1.5, 2],
-        "scale_pos_weight": [n_negative / max(n_positive, 1)],
     }
-
-    logger.info("Starting RandomizedSearchCV with 10-fold CV (100 iterations) ...")
-    cv = StratifiedKFold(n_splits=10, shuffle=True, random_state=42)
-    search = RandomizedSearchCV(
-        estimator=XGBClassifier(**base_params),
-        param_distributions=param_grid,
-        n_iter=100,
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    logger.info("XGBoost: RandomizedSearchCV 30 iterations, 5-fold CV ...")
+    xgb_search = RandomizedSearchCV(
+        estimator=XGBClassifier(**xgb_base),
+        param_distributions=xgb_param_grid,
+        n_iter=30,
         cv=cv,
         scoring="roc_auc",
         n_jobs=-1,
         verbose=0,
         random_state=42,
     )
-    search.fit(X_train, y_train)
+    xgb_search.fit(X_train_sm, y_train_sm)
+    logger.info(
+        "XGBoost best CV AUC-ROC: %.4f | params: %s",
+        xgb_search.best_score_, xgb_search.best_params_,
+    )
 
-    best_model: XGBClassifier = search.best_estimator_
-    logger.info("Best params: %s", search.best_params_)
-    logger.info("Best CV AUC-ROC: %.4f", search.best_score_)
+    # --- LightGBM hyperparameter search ---------------------------------
+    lgbm_param_grid = {
+        "n_estimators": [100, 200, 300, 500],
+        "num_leaves": [31, 50, 70, 100],
+        "learning_rate": [0.01, 0.05, 0.1],
+        "subsample": [0.7, 0.8, 0.9],
+        "colsample_bytree": [0.7, 0.8],
+        "min_child_samples": [10, 20, 30],
+        "reg_alpha": [0, 0.01, 0.1],
+        "reg_lambda": [1, 1.5, 2],
+    }
+    logger.info("LightGBM: RandomizedSearchCV 25 iterations, 5-fold CV ...")
+    lgbm_search = RandomizedSearchCV(
+        estimator=LGBMClassifier(random_state=42, verbose=-1, n_jobs=-1),
+        param_distributions=lgbm_param_grid,
+        n_iter=25,
+        cv=cv,
+        scoring="roc_auc",
+        n_jobs=-1,
+        verbose=0,
+        random_state=42,
+    )
+    lgbm_search.fit(X_train_sm, y_train_sm)
+    logger.info(
+        "LightGBM best CV AUC-ROC: %.4f | params: %s",
+        lgbm_search.best_score_, lgbm_search.best_params_,
+    )
 
-    # --- Evaluation on held-out test set --------------------------------
+    # --- Soft-voting ensemble: XGBoost + LightGBM -----------------------
+    logger.info("Building soft-voting ensemble (XGBoost + LightGBM) ...")
+    best_xgb = XGBClassifier(**{**xgb_base, **xgb_search.best_params_})
+    best_lgbm = LGBMClassifier(
+        **{"random_state": 42, "verbose": -1, "n_jobs": -1, **lgbm_search.best_params_}
+    )
+    best_model = VotingClassifier(
+        estimators=[("xgb", best_xgb), ("lgbm", best_lgbm)],
+        voting="soft",
+        n_jobs=1,
+    )
+    best_model.fit(X_train_sm, y_train_sm)
+    logger.info("Ensemble fitted on %d SMOTE'd samples.", len(X_train_sm))
+
+    # --- Evaluation on original held-out test set -----------------------
     y_pred = best_model.predict(X_test)
     y_proba = best_model.predict_proba(X_test)[:, 1]
 
@@ -353,15 +435,23 @@ def train_model(
         "recall": round(float(recall_score(y_test, y_pred, zero_division=0)), 4),
         "f1": round(float(f1_score(y_test, y_pred, zero_division=0)), 4),
         "auc_roc": round(float(roc_auc_score(y_test, y_proba)), 4),
+        "xgb_cv_auc": round(float(xgb_search.best_score_), 4),
+        "lgbm_cv_auc": round(float(lgbm_search.best_score_), 4),
     }
-    logger.info("Test metrics: %s", json.dumps(metrics, indent=2))
+    logger.info("Ensemble test metrics: %s", json.dumps(metrics, indent=2))
 
-    # --- Feature importances -------------------------------------------
-    importances = best_model.feature_importances_
+    # --- Feature importances (average from both models) ----------------
+    try:
+        xgb_imp  = best_model.estimators_[0].feature_importances_
+        lgbm_imp = best_model.estimators_[1].feature_importances_
+        importances = (xgb_imp + lgbm_imp) / 2.0
+    except (AttributeError, IndexError):
+        importances = np.zeros(len(FEATURE_NAMES))
+
     importance_pairs = sorted(
         zip(FEATURE_NAMES, importances), key=lambda x: x[1], reverse=True,
     )
-    logger.info("Top 10 features:")
+    logger.info("Top 10 features (ensemble avg importance):")
     for name, imp in importance_pairs[:10]:
         logger.info("  %-35s %.4f", name, imp)
 

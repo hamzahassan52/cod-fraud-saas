@@ -2,14 +2,14 @@
 """
 Generate synthetic COD fraud training data for Pakistani e-commerce.
 
-v2 — 100K edition:
-    - 100,000 samples (5x more than before)
-    - 20 Pakistani cities/regions (up from 12)
-    - 15 product categories (up from 10)
+v3 — 100K edition (48 features):
+    - 100,000 samples
+    - 20 Pakistani cities/regions
+    - 15 product categories
     - City signals balanced — model works even for unknown/rural areas
-    - Cleaner label generation (noise reduced: 0.3 → 0.2) → higher accuracy
+    - Cleaner label generation (noise: 0.18) → high accuracy
     - Better class balance: ~27% RTO rate
-    - Strictly uses the 35 canonical features from feature_map.py
+    - 48 canonical features (was 35): velocity, account-age, seasonal, discount, behavioral
 
 Usage::
     python scripts/generate_synthetic_data.py             # 100000 samples
@@ -107,7 +107,7 @@ CAT_AVG_PRICE  = np.array([p["avg_price"] for p in PRODUCT_CATEGORIES.values()])
 
 
 def generate_synthetic_data(n: int = 100000) -> pd.DataFrame:
-    """Return a DataFrame with *n* rows using the 35 canonical ML features."""
+    """Return a DataFrame with *n* rows using the 48 canonical ML features."""
 
     data: dict[str, np.ndarray] = {}
 
@@ -202,14 +202,68 @@ def generate_synthetic_data(n: int = 100000) -> pd.DataFrame:
     data["high_value_cod_first"] = data["is_high_value_order"] * data["is_cod"] * data["is_first_order"]
     data["phone_risk_score"]     = data["customer_rto_rate"] * (1.0 - data["phone_verified"])
 
-    # -- Seasonal signals ---------------------------------------------------
+    # ── NEW v2 features ────────────────────────────────────────────────────
+    # Velocity: orders in last 24h (fraudsters place many rapid orders)
+    # Most customers: 1 order/day.  Fraud rings: 3-10+ orders/hour.
+    velocity_base = RNG.choice([0,1,2,3,4,5,6,7,8,9,10], size=n,
+                                p=[0.55,0.22,0.10,0.05,0.03,0.02,0.01,0.01,0.005,0.003,0.002])
+    data["orders_last_24h"] = velocity_base.astype(float)
+    # 7-day velocity correlated with 24h but cumulative
+    data["orders_last_7d"]  = (velocity_base * RNG.uniform(1, 7, n)).astype(int).clip(0, 50).astype(float)
+
+    # Customer lifetime value (total historical PKR spent)
+    # New customers: low LTV.  Repeat: higher.
+    data["customer_lifetime_value"] = (
+        data["customer_avg_order_value"] * data["customer_order_count"].clip(0, 50)
+        + RNG.normal(0, 500, n)
+    ).clip(0, 500000)
+
+    # Amount vs customer average (current order / historical avg)
+    # > 3× their average = suspicious large order
+    historical_avg = data["customer_avg_order_value"].clip(200, 50000)
+    data["amount_vs_customer_avg"] = (data["order_amount"] / historical_avg.clip(1)).clip(0.1, 10.0)
+
+    # Account age signals
+    data["is_new_account"]       = (data["customer_account_age_days"] < 30).astype(float)
+    data["new_account_high_value"]= data["is_new_account"] * data["is_high_value_order"]
+    data["new_account_cod"]      = data["is_new_account"] * data["is_cod"]
+
+    # ── NEW v3 features ────────────────────────────────────────────────────
+
+    # 1-hour velocity burst: normal customers place 0 orders in any 1h window.
+    #    Fraud rings fire 3-10+ rapid orders from one phone in minutes.
+    velocity_1h_base = RNG.choice(
+        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], size=n,
+        p=[0.802, 0.12, 0.04, 0.02, 0.01, 0.004, 0.002, 0.001, 0.0005, 0.0003, 0.0002]
+    )
+    data["orders_last_1h"] = velocity_1h_base.astype(float)
+
+    # Seasonal signals — exposed as features (Pakistan-specific)
+    # Eid ul-Fitr/Adha: April, June, July (months shift yearly with lunar calendar)
     is_eid     = np.isin(months, [4, 5, 6, 7]).astype(float)
+    # Ramadan: March/April — different purchasing + higher cancellations
     is_ramadan = np.isin(months, [3, 4]).astype(float)
+    # Major sale events: 11.11 (Nov 8-14), 12.12 (Dec 9-15), Black Friday (Nov 22-28)
     is_sale    = (
         ((months == 11) & (days_arr >= 8)  & (days_arr <= 14))
         | ((months == 12) & (days_arr >= 9)  & (days_arr <= 15))
         | ((months == 11) & (days_arr >= 22) & (days_arr <= 28))
     ).astype(float)
+    data["is_eid_period"]  = is_eid
+    data["is_ramadan"]     = is_ramadan
+    data["is_sale_period"] = is_sale
+
+    # Discount abuse signal: >40% discount + COD + first order = suspicious pattern
+    data["is_high_discount"] = (data["discount_percentage"] > 40).astype(float)
+
+    # Average days between consecutive orders (behavioral fingerprint)
+    # Legitimate: 7-60 days avg. Fraud rings: < 1 day (ultra-rapid sequential ordering)
+    avg_days_sample = RNG.exponential(scale=25, size=n).clip(0.5, 365)
+    data["avg_days_between_orders"] = np.where(
+        data["is_first_order"] == 1.0,
+        999.0,            # no prior order history
+        avg_days_sample,  # simulate typical inter-order gaps
+    )
 
     # -- Target label: is_rto -----------------------------------------------
     # City signals get moderate weight (0.8 vs customer signals 1.4+)
@@ -253,12 +307,29 @@ def generate_synthetic_data(n: int = 100000) -> pd.DataFrame:
         + 2.0  * data["high_value_cod_first"]
         + 0.9  * data["phone_risk_score"]
         + 0.6  * data["is_night_order"] * data["is_first_order"]
-        # Seasonal
-        + 0.35 * is_eid
-        + 0.25 * is_sale
-        + 0.15 * is_ramadan
+        # Seasonal (Pakistan-specific patterns)
+        + 0.35 * data["is_eid_period"]
+        + 0.15 * data["is_ramadan"]
+        + 0.25 * data["is_sale_period"]
+        # Velocity signals (rapid ordering = strong fraud indicator)
+        + 0.6  * (data["orders_last_24h"] >= 3).astype(float)    # 3+ orders in 24h = suspicious
+        + 1.0  * (data["orders_last_24h"] >= 5).astype(float)    # 5+ = very suspicious
+        + 0.3  * (data["orders_last_7d"]  >= 10).astype(float)
+        # Value anomaly (ordering much more than usual)
+        + 0.5  * (data["amount_vs_customer_avg"] > 3.0).astype(float)
+        + 0.8  * (data["amount_vs_customer_avg"] > 5.0).astype(float)
+        # New account combos (powerful fraud signals)
+        + 0.8  * data["new_account_cod"]                          # new + COD
+        + 1.2  * data["new_account_high_value"]                   # new + expensive
+        # v3: 1-hour velocity burst (very strong flash-fraud signal)
+        + 2.0  * (data["orders_last_1h"] >= 2).astype(float)     # 2+ in 1h = very suspicious
+        + 3.5  * (data["orders_last_1h"] >= 4).astype(float)     # 4+ in 1h = almost certainly fraud
+        # v3: discount abuse combined with risky COD first-order pattern
+        + 0.9  * data["is_high_discount"] * data["cod_first_order"]
+        # v3: ultra-rapid sequential ordering (< 1 day avg interval + COD)
+        + 0.7  * (data["avg_days_between_orders"] < 1.0).astype(float) * data["is_cod"]
         # Reduced noise → cleaner signal → higher accuracy
-        + RNG.normal(0, 0.20, n)
+        + RNG.normal(0, 0.18, n)
     )
 
     prob = 1.0 / (1.0 + np.exp(-logit))

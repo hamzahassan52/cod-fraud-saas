@@ -136,10 +136,33 @@ export class MLClient {
       is_repeat_customer: isRepeat,
       days_since_last_order: f.daysSinceLastOrder,
 
-      // Interaction features (computed by ML model during training)
+      // Interaction features
       cod_first_order: isCod * isFirstOrder,
       high_value_cod_first: isHighValueOrder * isCod * isFirstOrder,
       phone_risk_score: f.customerRtoRate * (1 - phoneVerified),
+
+      // Velocity features (v2)
+      orders_last_24h: f.ordersLast24h,
+      orders_last_7d:  f.ordersLast7d,
+
+      // Value anomaly (v2)
+      customer_lifetime_value: f.customerLifetimeValue,
+      amount_vs_customer_avg: f.customerAvgOrderValue > 0
+        ? f.orderAmount / f.customerAvgOrderValue
+        : 1.0,
+
+      // New account signals (v2)
+      is_new_account:        f.phoneAgeInDays < 30 ? 1 : 0,
+      new_account_high_value: (f.phoneAgeInDays < 30 && isHighValueOrder) ? 1 : 0,
+      new_account_cod:        (f.phoneAgeInDays < 30 && isCod)            ? 1 : 0,
+
+      // Seasonal + behavioral + discount signals (v3)
+      orders_last_1h:         f.ordersLast1h,
+      is_eid_period:          f.isEidPeriod ? 1 : 0,
+      is_ramadan:             f.isRamadan ? 1 : 0,
+      is_sale_period:         f.isSalePeriod ? 1 : 0,
+      is_high_discount:       f.isHighDiscount ? 1 : 0,
+      avg_days_between_orders: f.avgDaysBetweenOrders,
     };
   }
 }

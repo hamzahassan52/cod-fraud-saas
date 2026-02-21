@@ -41,6 +41,10 @@ export interface OrderFeatures {
   previousRtoCount: number;
   customerRtoRate: number;
   daysSinceLastOrder: number;
+  ordersLast24h: number;
+  ordersLast7d: number;
+  customerLifetimeValue: number;
+  customerAvgOrderValue: number;
 
   // Behavioral features
   orderHour: number;
@@ -57,6 +61,14 @@ export interface OrderFeatures {
   emailBlacklisted: boolean;
   addressBlacklisted: boolean;
   ipBlacklisted: boolean;
+
+  // v3: seasonal + behavioral + discount signals
+  ordersLast1h: number;          // orders from same phone in last 1 hour (flash fraud)
+  isEidPeriod: boolean;          // Eid ul-Fitr/Adha season (April, June, July)
+  isRamadan: boolean;            // Ramadan month (March/April)
+  isSalePeriod: boolean;         // 11.11 / 12.12 / Black Friday sale event
+  isHighDiscount: boolean;       // discount > 40%
+  avgDaysBetweenOrders: number;  // avg days between orders (< 1 = rapid ring fraud)
 
   // Normalized phone
   normalizedPhone: NormalizedPhone;
@@ -87,6 +99,19 @@ export class FeatureExtractor {
     const isWeekend = orderDate.getDay() === 0 || orderDate.getDay() === 6;
     const amount = parseFloat(order.total_amount) || 0;
     const itemsCount = order.items_count || 0;
+
+    // v3: seasonal flags (Pakistan-specific)
+    const orderMonth = orderDate.getMonth() + 1; // 1-12
+    const orderDay = orderDate.getDate();
+    const isEidPeriod = [4, 6, 7].includes(orderMonth);
+    const isRamadan = [3, 4].includes(orderMonth);
+    const isSalePeriod = (
+      (orderMonth === 11 && orderDay >= 8  && orderDay <= 14)  || // 11.11
+      (orderMonth === 11 && orderDay >= 22 && orderDay <= 28)  || // Black Friday
+      (orderMonth === 12 && orderDay >= 9  && orderDay <= 15)     // 12.12
+    );
+    const discountPct = parseFloat(order.discount_percentage) || 0;
+    const isHighDiscount = discountPct > 40;
 
     return {
       // Phone
@@ -122,6 +147,10 @@ export class FeatureExtractor {
       previousRtoCount: customerHistory.rtoCount,
       customerRtoRate: customerHistory.rtoRate,
       daysSinceLastOrder: customerHistory.daysSinceLast,
+      ordersLast24h: customerHistory.ordersLast24h,
+      ordersLast7d: customerHistory.ordersLast7d,
+      customerLifetimeValue: customerHistory.lifetimeValue,
+      customerAvgOrderValue: customerHistory.avgOrderValue,
 
       // Behavioral
       orderHour: hour,
@@ -138,6 +167,14 @@ export class FeatureExtractor {
       emailBlacklisted: blacklists.email,
       addressBlacklisted: blacklists.address,
       ipBlacklisted: blacklists.ip,
+
+      // v3: seasonal + behavioral + discount
+      ordersLast1h: customerHistory.ordersLast1h,
+      isEidPeriod,
+      isRamadan,
+      isSalePeriod,
+      isHighDiscount,
+      avgDaysBetweenOrders: customerHistory.avgDaysBetweenOrders,
 
       normalizedPhone: phone,
     };
@@ -207,28 +244,53 @@ export class FeatureExtractor {
   }
 
   private async getCustomerHistory(phone: string, email: string) {
+    const now = new Date();
+    const ago1h  = new Date(now.getTime() - 1  * 60 * 60 * 1000).toISOString();
+    const ago24h = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+    const ago7d  = new Date(now.getTime() - 7  * 24 * 60 * 60 * 1000).toISOString();
+
     const result = await query(
       `SELECT
-        COUNT(*) as order_count,
-        COUNT(*) FILTER (WHERE status = 'rto') as rto_count,
-        MAX(created_at) as last_order
+        COUNT(*)                                              as order_count,
+        COUNT(*) FILTER (WHERE status = 'rto')               as rto_count,
+        COUNT(*) FILTER (WHERE created_at >= $4)             as orders_last_1h,
+        COUNT(*) FILTER (WHERE created_at >= $5)             as orders_last_24h,
+        COUNT(*) FILTER (WHERE created_at >= $6)             as orders_last_7d,
+        COALESCE(SUM(total_amount), 0)                       as lifetime_value,
+        COALESCE(AVG(total_amount), 0)                       as avg_order_value,
+        MIN(created_at)                                      as first_order,
+        MAX(created_at)                                      as last_order
        FROM orders
        WHERE tenant_id = $1 AND (phone_normalized = $2 OR customer_email = $3)`,
-      [this.tenantId, phone, email]
+      [this.tenantId, phone, email, ago1h, ago24h, ago7d]
     );
     const row = result.rows[0];
     const orderCount = parseInt(row.order_count) || 0;
-    const rtoCount = parseInt(row.rto_count) || 0;
-    const lastOrder = row.last_order ? new Date(row.last_order) : null;
+    const rtoCount   = parseInt(row.rto_count)   || 0;
+    const lastOrder  = row.last_order  ? new Date(row.last_order)  : null;
+    const firstOrder = row.first_order ? new Date(row.first_order) : null;
     const daysSinceLast = lastOrder
       ? Math.floor((Date.now() - lastOrder.getTime()) / 86400000)
       : 999;
 
+    // Average days between consecutive orders (rough approximation from total span)
+    let avgDaysBetweenOrders = 999;
+    if (orderCount > 1 && firstOrder && lastOrder) {
+      const spanDays = (lastOrder.getTime() - firstOrder.getTime()) / 86400000;
+      avgDaysBetweenOrders = Math.round(spanDays / (orderCount - 1));
+    }
+
     return {
       orderCount,
       rtoCount,
-      rtoRate: orderCount > 0 ? rtoCount / orderCount : 0,
+      rtoRate:              orderCount > 0 ? rtoCount / orderCount : 0,
       daysSinceLast,
+      ordersLast1h:         parseInt(row.orders_last_1h)  || 0,
+      ordersLast24h:        parseInt(row.orders_last_24h) || 0,
+      ordersLast7d:         parseInt(row.orders_last_7d)  || 0,
+      lifetimeValue:        parseFloat(row.lifetime_value)  || 0,
+      avgOrderValue:        parseFloat(row.avg_order_value) || 0,
+      avgDaysBetweenOrders,
     };
   }
 

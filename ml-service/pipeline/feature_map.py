@@ -2,9 +2,10 @@
 Single source of truth for feature names between the Node.js backend and the ML model.
 
 The backend (FeatureExtractor) produces features with one naming convention,
-and the ML model expects a different set of 35 feature names.
+and the ML model expects a specific set of feature names.
 
 This module defines the canonical mapping so both sides stay in sync.
+v3: 48 features (was 42) — added seasonal, discount, velocity-1h, behavioral patterns.
 """
 
 from __future__ import annotations
@@ -12,7 +13,10 @@ from __future__ import annotations
 from typing import Dict, List
 
 # ---------------------------------------------------------------------------
-# The canonical 35 features the ML model expects (sorted alphabetically).
+# The canonical 48 features the ML model expects (sorted alphabetically).
+# v1: 35 base features
+# v2: +7 velocity/account-age features (orders_last_24h, orders_last_7d, etc.)
+# v3: +6 seasonal/behavioral features (orders_last_1h, seasonal flags, discount, avg days)
 # ---------------------------------------------------------------------------
 FEATURE_NAMES: List[str] = sorted([
     "order_amount",
@@ -51,6 +55,21 @@ FEATURE_NAMES: List[str] = sorted([
     "cod_first_order",
     "high_value_cod_first",
     "phone_risk_score",
+    # v2: velocity + value anomaly + account-age signals
+    "orders_last_24h",           # orders from same phone in last 24 hours
+    "orders_last_7d",            # orders from same phone in last 7 days
+    "customer_lifetime_value",   # total PKR spent historically
+    "amount_vs_customer_avg",    # current order / historical avg (>2 = suspicious)
+    "is_new_account",            # phone first seen < 30 days ago
+    "new_account_high_value",    # new account + order > 5000 PKR
+    "new_account_cod",           # new account + COD payment
+    # v3: seasonal intelligence + behavioral patterns + discount abuse
+    "orders_last_1h",            # orders from same phone in last 1 hour (flash fraud)
+    "is_eid_period",             # Eid ul-Fitr/Adha season (April, June, July in Pakistan)
+    "is_ramadan",                # Ramadan month (March/April) — different shopping patterns
+    "is_sale_period",            # 11.11 / 12.12 / Black Friday sale event
+    "is_high_discount",          # discount > 40% (combined with COD = abuse signal)
+    "avg_days_between_orders",   # avg days between consecutive orders (< 1 = rapid ring)
 ])
 
 # ---------------------------------------------------------------------------
@@ -91,6 +110,21 @@ FEATURE_DEFAULTS: Dict[str, float] = {
     "same_city_shipping": 0.0,
     "discount_percentage": 0.0,
     "is_prepaid": 0.0,
+    # v2 feature defaults
+    "orders_last_24h": 0.0,
+    "orders_last_7d": 0.0,
+    "customer_lifetime_value": 0.0,
+    "amount_vs_customer_avg": 1.0,   # neutral: same as historical avg
+    "is_new_account": 0.0,
+    "new_account_high_value": 0.0,
+    "new_account_cod": 0.0,
+    # v3 feature defaults
+    "orders_last_1h": 0.0,
+    "is_eid_period": 0.0,
+    "is_ramadan": 0.0,
+    "is_sale_period": 0.0,
+    "is_high_discount": 0.0,
+    "avg_days_between_orders": 999.0,  # unknown history = treat as first order
 }
 
 
