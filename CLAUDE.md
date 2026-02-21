@@ -12,14 +12,59 @@
 - **GitHub**: https://github.com/hamzahassan52/cod-fraud-saas
 
 ## Accounts (Production)
+
+### Core Accounts
 | Account | Email | Password | Tenant ID | Plan | Purpose |
 |---------|-------|----------|-----------|------|---------|
 | Admin | admin@cod.com | fast4400F | 22e38bb9-ec28-45dc-94ac-6db825256f71 | enterprise | Owner's admin account |
-| Demo | demo@cod.com | cod4400F | b90f2e04-4e9a-487b-85cc-2dc0823a8c07 | enterprise | Demo/showcase account |
+| Demo | demo@cod.com | cod4400F | b90f2e04-4e9a-487b-85cc-2dc0823a8c07 | enterprise | Main demo — 1551 Shopify orders, full data |
 | Test | hamza007g1@gmail.com | fast4400F | f73751a1-00b8-499d-9b33-2d41339b5539 | enterprise | Test account |
 
 - Demo API Key: `cfr_f90e29815c9d40f6b7b4dd43e5017fe4`
-- Demo account has 15 realistic Pakistani COD orders pre-loaded
+- Demo account: 1551 orders, Shopify (trendypk.myshopify.com), PKR 1.18M protected, 20 blacklisted
+
+### Category Demo Accounts (34 accounts — all password: `Demo4400F`)
+Each account has 100 realistic orders for its niche. Shopify connected. Use for client demos.
+
+| Email | Category | Price Range (PKR) |
+|-------|----------|-------------------|
+| beautyhealth@cod.com | Beauty & Health | 600 – 4,000 |
+| womensclothing@cod.com | Women's Clothing | 1,500 – 8,000 |
+| homekitchen@cod.com | Home & Kitchen | 800 – 8,000 |
+| mensclothing@cod.com | Men's Clothing | 1,500 – 6,000 |
+| womensshoes@cod.com | Women's Shoes | 1,200 – 5,500 |
+| mensunderwear@cod.com | Men's Underwear & Sleepwear | 500 – 2,500 |
+| sports@cod.com | Sports & Outdoors | 800 – 9,000 |
+| officesupplies@cod.com | Office & School Supplies | 300 – 2,500 |
+| toysgames@cod.com | Toys & Games | 600 – 5,000 |
+| kidsfashion@cod.com | Kids' Fashion | 500 – 3,500 |
+| electronics@cod.com | Electronics | 2,000 – 18,000 |
+| business@cod.com | Business, Industry & Science | 2,000 – 20,000 |
+| petsupplies@cod.com | Pet Supplies | 600 – 4,000 |
+| jewellery@cod.com | Jewellery & Accessories | 800 – 9,000 |
+| automotive@cod.com | Automotive | 800 – 10,000 |
+| womenscurve@cod.com | Women's Curve Clothing | 1,500 – 6,000 |
+| musical@cod.com | Musical Instruments | 1,500 – 20,000 |
+| bags@cod.com | Bags & Luggage | 900 – 9,000 |
+| health@cod.com | Health & Household | 800 – 6,000 |
+| garden@cod.com | Patio, Lawn & Garden | 600 – 5,000 |
+| tools@cod.com | Tools & Home Improvement | 700 – 9,000 |
+| appliances@cod.com | Appliances | 3,000 – 28,000 |
+| lingerie@cod.com | Women's Lingerie & Lounge | 500 – 3,500 |
+| baby@cod.com | Baby & Maternity | 600 – 5,000 |
+| mensbig@cod.com | Men's Big & Tall | 1,500 – 6,000 |
+| smarthome@cod.com | Smart Home | 1,500 – 20,000 |
+| artscrafts@cod.com | Arts, Crafts & Sewing | 500 – 8,000 |
+| mensshoes@cod.com | Men's Shoes | 1,500 – 8,000 |
+| kidsshoes@cod.com | Kids' Shoes | 600 – 3,500 |
+| mobile@cod.com | Mobile Phones & Accessories | 300 – 5,000 |
+| food@cod.com | Food & Grocery | 500 – 4,000 |
+| books@cod.com | Books & Media | 300 – 3,000 |
+| beachwear@cod.com | Beachwear | 600 – 4,000 |
+| furniture@cod.com | Furniture | 4,000 – 35,000 |
+
+**To re-seed demo data:** `NODE_PATH=./backend/node_modules node scripts/seed_demo.js`
+**To re-seed category demos:** `NODE_PATH=./backend/node_modules node scripts/seed_category_demos.js`
 
 ## Architecture
 - **Backend**: Node.js + TypeScript + Fastify + PostgreSQL + Redis + BullMQ
