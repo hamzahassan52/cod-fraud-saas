@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { mlApi, shopifyApi } from '@/lib/api';
+import { mlApi, shopifyApi, settingsApi } from '@/lib/api';
 import DashboardLayout from '@/components/layout/dashboard-layout';
 import { Card } from '@/components/ui/card';
 import { Modal } from '@/components/ui/modal';
@@ -42,6 +42,10 @@ export default function SettingsPage() {
   const [generatingKey, setGeneratingKey] = useState(false);
   const [copiedKey, setCopiedKey] = useState(false);
 
+  // Webhook secrets (per-platform HMAC secrets)
+  const [webhookSecretConfigured, setWebhookSecretConfigured] = useState<Record<string, boolean>>({});
+  const [savingSecret, setSavingSecret] = useState<string | null>(null);
+
   // Integrations
   const [shopifyConnected, setShopifyConnected] = useState(false);
   const [shopifyShop, setShopifyShop] = useState('');
@@ -59,6 +63,7 @@ export default function SettingsPage() {
     fetchApiKeys();
     fetchThresholds();
     fetchShopifyStatus();
+    fetchWebhookSecrets();
   }, []);
 
   const fetchProfile = async () => {
@@ -165,6 +170,27 @@ export default function SettingsPage() {
     }
   };
 
+  const fetchWebhookSecrets = async () => {
+    try {
+      const res = await settingsApi.getWebhookSecrets();
+      setWebhookSecretConfigured(res.data.configured || {});
+    } catch {
+      // Non-fatal
+    }
+  };
+
+  const saveWebhookSecret = async (platform: string, secret: string) => {
+    setSavingSecret(platform);
+    try {
+      await settingsApi.saveWebhookSecret(platform, secret);
+      setWebhookSecretConfigured(prev => ({ ...prev, [platform]: true }));
+    } catch (err: any) {
+      alert(err.response?.data?.error || 'Failed to save webhook secret');
+    } finally {
+      setSavingSecret(null);
+    }
+  };
+
   const fetchShopifyStatus = async () => {
     try {
       const res = await shopifyApi.status();
@@ -210,9 +236,23 @@ export default function SettingsPage() {
     }
   };
 
-  const copyWebhookUrl = async (platform: string) => {
+  const getWebhookUrl = (platform: string) => {
     const backendUrl = process.env.NEXT_PUBLIC_API_URL?.replace('/api/v1', '') || 'https://cod-fraud-saas-production.up.railway.app';
-    const url = `${backendUrl}/api/v1/webhook/${platform}`;
+    const firstKey = apiKeys[0]?.prefix;
+    const keyParam = firstKey ? `?api_key=${firstKey}...` : '';
+    return `${backendUrl}/api/v1/webhook/${platform}${keyParam}`;
+  };
+
+  const getWebhookUrlFull = (platform: string) => {
+    const backendUrl = process.env.NEXT_PUBLIC_API_URL?.replace('/api/v1', '') || 'https://cod-fraud-saas-production.up.railway.app';
+    return `${backendUrl}/api/v1/webhook/${platform}`;
+  };
+
+  const copyWebhookUrl = async (platform: string) => {
+    const base = getWebhookUrlFull(platform);
+    // For WooCommerce/Magento/Joomla, include ?api_key= hint (user replaces YOUR_KEY with actual key)
+    const needsQueryAuth = ['woocommerce', 'magento', 'joomla'].includes(platform);
+    const url = needsQueryAuth ? `${base}?api_key=YOUR_API_KEY` : base;
     try {
       await navigator.clipboard.writeText(url);
     } catch {
@@ -569,12 +609,14 @@ export default function SettingsPage() {
               expanded={expandedPlatform === 'woocommerce'}
               onCopy={() => copyWebhookUrl('woocommerce')}
               onToggle={() => setExpandedPlatform(expandedPlatform === 'woocommerce' ? null : 'woocommerce')}
+              secretConfigured={webhookSecretConfigured['woocommerce'] || false}
+              savingSecret={savingSecret === 'woocommerce'}
+              onSaveSecret={(s) => saveWebhookSecret('woocommerce', s)}
               instructions={[
                 'Go to WooCommerce → Settings → Advanced → Webhooks',
-                'Click "Add webhook"',
-                'Set Topic to "Order created"',
-                'Paste the webhook URL above in the Delivery URL field',
-                'Add your API key in the Secret field',
+                'Click "Add webhook" and set Topic to "Order created"',
+                'Paste the Delivery URL above (replace YOUR_API_KEY with your actual key from the API Keys section)',
+                'In the "Secret" field, enter the same value as your Webhook HMAC Secret below — this adds request signature verification',
                 'Save and test with a new order',
               ]}
             />
@@ -588,11 +630,14 @@ export default function SettingsPage() {
               expanded={expandedPlatform === 'magento'}
               onCopy={() => copyWebhookUrl('magento')}
               onToggle={() => setExpandedPlatform(expandedPlatform === 'magento' ? null : 'magento')}
+              secretConfigured={webhookSecretConfigured['magento'] || false}
+              savingSecret={savingSecret === 'magento'}
+              onSaveSecret={(s) => saveWebhookSecret('magento', s)}
               instructions={[
                 'Install the COD Fraud Shield Magento module',
                 'Go to Stores → Configuration → COD Fraud Shield',
-                'Paste the webhook URL in the Endpoint field',
-                'Enter your API key',
+                'Paste the webhook URL in the Endpoint field (replace YOUR_API_KEY with your actual key)',
+                'Enter the Webhook HMAC Secret below in the module secret field',
                 'Save and flush cache',
               ]}
             />
@@ -606,11 +651,14 @@ export default function SettingsPage() {
               expanded={expandedPlatform === 'joomla'}
               onCopy={() => copyWebhookUrl('joomla')}
               onToggle={() => setExpandedPlatform(expandedPlatform === 'joomla' ? null : 'joomla')}
+              secretConfigured={webhookSecretConfigured['joomla'] || false}
+              savingSecret={savingSecret === 'joomla'}
+              onSaveSecret={(s) => saveWebhookSecret('joomla', s)}
               instructions={[
                 'Install the COD Fraud Shield plugin from Extensions → Manage',
                 'Go to Components → VirtueMart → Configuration',
-                'Paste the webhook URL in the Fraud Check URL field',
-                'Enter your API key',
+                'Paste the webhook URL in the Fraud Check URL field (replace YOUR_API_KEY with your actual key)',
+                'Enter the Webhook HMAC Secret below in the plugin secret field',
                 'Save configuration',
               ]}
             />
@@ -688,13 +736,26 @@ interface WebhookPlatformCardProps {
   onCopy: () => void;
   onToggle: () => void;
   instructions: string[];
+  secretConfigured?: boolean;
+  savingSecret?: boolean;
+  onSaveSecret?: (secret: string) => void;
 }
 
-function WebhookPlatformCard({ platform, name, emoji, copied, expanded, onCopy, onToggle, instructions }: WebhookPlatformCardProps) {
+function WebhookPlatformCard({
+  platform, name, emoji, copied, expanded, onCopy, onToggle, instructions,
+  secretConfigured, savingSecret, onSaveSecret,
+}: WebhookPlatformCardProps) {
   const backendUrl = typeof window !== 'undefined'
     ? (process.env.NEXT_PUBLIC_API_URL?.replace('/api/v1', '') || 'https://cod-fraud-saas-production.up.railway.app')
     : 'https://cod-fraud-saas-production.up.railway.app';
-  const webhookUrl = `${backendUrl}/api/v1/webhook/${platform}`;
+
+  const needsQueryAuth = ['woocommerce', 'magento', 'joomla'].includes(platform);
+  const webhookUrl = needsQueryAuth
+    ? `${backendUrl}/api/v1/webhook/${platform}?api_key=YOUR_API_KEY`
+    : `${backendUrl}/api/v1/webhook/${platform}`;
+
+  const [secretInput, setSecretInput] = useState('');
+  const [showSecret, setShowSecret] = useState(false);
 
   return (
     <div className="rounded-xl border border-gray-200 dark:border-slate-700 p-4">
@@ -707,7 +768,7 @@ function WebhookPlatformCard({ platform, name, emoji, copied, expanded, onCopy, 
             <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">{name}</p>
             <div className="flex items-center gap-1.5 mt-0.5">
               <span className="h-1.5 w-1.5 rounded-full bg-gray-400" />
-              <span className="text-xs text-gray-500 dark:text-slate-400">Not Connected</span>
+              <span className="text-xs text-gray-500 dark:text-slate-400">Webhook Integration</span>
             </div>
           </div>
         </div>
@@ -720,7 +781,14 @@ function WebhookPlatformCard({ platform, name, emoji, copied, expanded, onCopy, 
       </div>
 
       <div className="mt-3">
-        <p className="text-xs text-gray-500 dark:text-slate-400 mb-1">Webhook URL</p>
+        <div className="flex items-center justify-between mb-1">
+          <p className="text-xs text-gray-500 dark:text-slate-400">Delivery URL</p>
+          {needsQueryAuth && (
+            <span className="text-[10px] bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 rounded px-1.5 py-0.5">
+              Replace YOUR_API_KEY
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           <code className="flex-1 truncate rounded-lg bg-gray-50 dark:bg-slate-700 border border-gray-200 dark:border-slate-600 px-2 py-1.5 text-xs font-mono text-gray-700 dark:text-slate-300">
             {webhookUrl}
@@ -738,6 +806,70 @@ function WebhookPlatformCard({ platform, name, emoji, copied, expanded, onCopy, 
           </button>
         </div>
       </div>
+
+      {/* HMAC Secret management (for non-Shopify platforms) */}
+      {onSaveSecret && (
+        <div className="mt-3 rounded-lg border border-gray-100 dark:border-slate-600/50 p-3">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-1.5">
+              <svg className="w-3.5 h-3.5 text-gray-500 dark:text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+              <p className="text-xs font-medium text-gray-700 dark:text-slate-300">Webhook HMAC Secret</p>
+            </div>
+            {secretConfigured && (
+              <span className="flex items-center gap-1 text-[10px] text-green-700 dark:text-green-400">
+                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                </svg>
+                Configured
+              </span>
+            )}
+          </div>
+          <p className="text-[11px] text-gray-500 dark:text-slate-400 mb-2">
+            Set the same secret in your platform&apos;s webhook settings. We&apos;ll use it to verify every request is genuinely from your store.
+          </p>
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <input
+                type={showSecret ? 'text' : 'password'}
+                value={secretInput}
+                onChange={(e) => setSecretInput(e.target.value)}
+                placeholder={secretConfigured ? '••••••••  (set — enter new to update)' : 'Enter a strong secret (min 8 chars)'}
+                className="w-full rounded-lg border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 px-2.5 py-1.5 pr-8 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <button
+                type="button"
+                onClick={() => setShowSecret(v => !v)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-slate-300"
+              >
+                {showSecret ? (
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                  </svg>
+                ) : (
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                )}
+              </button>
+            </div>
+            <button
+              onClick={() => {
+                if (secretInput.trim().length >= 8) {
+                  onSaveSecret(secretInput.trim());
+                  setSecretInput('');
+                }
+              }}
+              disabled={savingSecret || secretInput.trim().length < 8}
+              className="flex-shrink-0 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors disabled:opacity-50"
+            >
+              {savingSecret ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {expanded && (
         <div className="mt-3 rounded-lg bg-gray-50 dark:bg-slate-700/50 p-3">

@@ -108,4 +108,11 @@ export const shopifyApi = {
   testWebhook: () => api.post('/shopify/test-webhook'),
 };
 
+// Settings
+export const settingsApi = {
+  getWebhookSecrets: () => api.get('/settings/webhook-secrets'),
+  saveWebhookSecret: (platform: string, secret: string) =>
+    api.put('/settings/webhook-secrets', { platform, secret }),
+};
+
 export default api;

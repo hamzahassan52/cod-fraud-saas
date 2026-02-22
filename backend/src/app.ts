@@ -106,6 +106,42 @@ export async function buildApp(): Promise<FastifyInstance> {
     });
   });
 
+  // GET /api/v1/settings/webhook-secrets — returns masked secrets (first 4 chars only)
+  app.get('/api/v1/settings/webhook-secrets', async (request, reply) => {
+    try { await (request as any).jwtVerify(); } catch { return reply.code(401).send({ error: 'Unauthorized' }); }
+    const tenantId = (request as any).user?.tenantId;
+    const { query: dbQuery } = await import('./db/connection');
+    const result = await dbQuery(`SELECT settings FROM tenants WHERE id = $1`, [tenantId]);
+    const settings = result.rows[0]?.settings || {};
+    const secrets: Record<string, string> = settings.webhookSecrets || {};
+    const masked: Record<string, boolean> = {};
+    for (const [platform, secret] of Object.entries(secrets)) {
+      masked[platform] = typeof secret === 'string' && secret.length > 0;
+    }
+    return reply.send({ configured: masked });
+  });
+
+  // PUT /api/v1/settings/webhook-secrets — save webhook HMAC secret for a platform
+  app.put('/api/v1/settings/webhook-secrets', async (request, reply) => {
+    try { await (request as any).jwtVerify(); } catch { return reply.code(401).send({ error: 'Unauthorized' }); }
+    const tenantId = (request as any).user?.tenantId;
+    const { platform, secret } = request.body as any;
+    const allowed = ['woocommerce', 'magento', 'joomla'];
+    if (!allowed.includes(platform)) {
+      return reply.code(400).send({ error: 'Invalid platform. Must be one of: ' + allowed.join(', ') });
+    }
+    if (typeof secret !== 'string' || secret.length < 8) {
+      return reply.code(400).send({ error: 'Secret must be at least 8 characters' });
+    }
+    const { query: dbQuery } = await import('./db/connection');
+    const result = await dbQuery(`SELECT settings FROM tenants WHERE id = $1`, [tenantId]);
+    const settings = result.rows[0]?.settings || {};
+    settings.webhookSecrets = settings.webhookSecrets || {};
+    settings.webhookSecrets[platform] = secret;
+    await dbQuery(`UPDATE tenants SET settings = $1 WHERE id = $2`, [JSON.stringify(settings), tenantId]);
+    return reply.send({ success: true, platform });
+  });
+
   // ---- Global Error Handler ----
   app.setErrorHandler((error, request, reply) => {
     const statusCode = error.statusCode || 500;

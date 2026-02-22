@@ -51,10 +51,10 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: `No plugin registered for: ${platform}` });
       }
 
-      // 3. Find tenant by API key
-      const apiKey = request.headers['x-api-key'] as string;
+      // 3. Find tenant by API key (header or query param for WooCommerce/Magento compatibility)
+      const apiKey = (request.headers['x-api-key'] as string) || (request.query as any).api_key;
       if (!apiKey) {
-        return reply.code(401).send({ error: 'Missing X-API-Key header' });
+        return reply.code(401).send({ error: 'Missing API key. Add X-API-Key header or ?api_key= query param.' });
       }
 
       const crypto = require('crypto');
