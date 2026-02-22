@@ -97,7 +97,13 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
         );
         if (!valid) return reply.code(401).send({ error: 'Invalid Shopify webhook signature' });
       } else {
-        const secret = tenant.webhook_secrets?.[platform] || '';
+        // webhook_secrets comes from DB as JSON string (settings->>'webhookSecrets')
+        let webhookSecrets: Record<string, string> = {};
+        try {
+          const raw = tenant.webhook_secrets;
+          if (raw) webhookSecrets = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        } catch { /* malformed JSON — treat as no secret */ }
+        const secret = webhookSecrets[platform] || '';
         if (secret) {
           const valid = plugin.validateWebhook(
             request.headers as Record<string, string>,
