@@ -141,7 +141,7 @@ export default function SettingsPage() {
     setGeneratingKey(true);
     setNewKey(null);
     try {
-      const res = await api.post('/auth/api-keys');
+      const res = await api.post('/auth/api-keys', {});
       const key = res.data.apiKey || res.data.key || res.data.api_key;
       setNewKey(key);
       await fetchApiKeys();
@@ -618,48 +618,6 @@ export default function SettingsPage() {
                 'Paste the Delivery URL above (replace YOUR_API_KEY with your actual key from the API Keys section)',
                 'In the "Secret" field, enter the same value as your Webhook HMAC Secret below — this adds request signature verification',
                 'Save and test with a new order',
-              ]}
-            />
-
-            {/* Magento */}
-            <WebhookPlatformCard
-              platform="magento"
-              name="Magento"
-              emoji="🧲"
-              copied={copiedWebhookUrl === 'magento'}
-              expanded={expandedPlatform === 'magento'}
-              onCopy={() => copyWebhookUrl('magento')}
-              onToggle={() => setExpandedPlatform(expandedPlatform === 'magento' ? null : 'magento')}
-              secretConfigured={webhookSecretConfigured['magento'] || false}
-              savingSecret={savingSecret === 'magento'}
-              onSaveSecret={(s) => saveWebhookSecret('magento', s)}
-              instructions={[
-                'Install the COD Fraud Shield Magento module',
-                'Go to Stores → Configuration → COD Fraud Shield',
-                'Paste the webhook URL in the Endpoint field (replace YOUR_API_KEY with your actual key)',
-                'Enter the Webhook HMAC Secret below in the module secret field',
-                'Save and flush cache',
-              ]}
-            />
-
-            {/* Joomla */}
-            <WebhookPlatformCard
-              platform="joomla"
-              name="Joomla / VirtueMart"
-              emoji="🟣"
-              copied={copiedWebhookUrl === 'joomla'}
-              expanded={expandedPlatform === 'joomla'}
-              onCopy={() => copyWebhookUrl('joomla')}
-              onToggle={() => setExpandedPlatform(expandedPlatform === 'joomla' ? null : 'joomla')}
-              secretConfigured={webhookSecretConfigured['joomla'] || false}
-              savingSecret={savingSecret === 'joomla'}
-              onSaveSecret={(s) => saveWebhookSecret('joomla', s)}
-              instructions={[
-                'Install the COD Fraud Shield plugin from Extensions → Manage',
-                'Go to Components → VirtueMart → Configuration',
-                'Paste the webhook URL in the Fraud Check URL field (replace YOUR_API_KEY with your actual key)',
-                'Enter the Webhook HMAC Secret below in the plugin secret field',
-                'Save configuration',
               ]}
             />
 

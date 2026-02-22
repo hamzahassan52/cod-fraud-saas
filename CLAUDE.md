@@ -284,6 +284,8 @@ cod-fraud-saas/
 
 ### Settings
 - `GET /api/v1/settings/thresholds` — Get current thresholds
+- `GET /api/v1/settings/webhook-secrets` — Returns `{configured: {woocommerce: bool, ...}}` — only shows true/false, never exposes actual secret value
+- `PUT /api/v1/settings/webhook-secrets` — Save HMAC signing secret for a platform (body: `{platform: 'woocommerce'|'magento'|'joomla', secret: string}`). Min 8 chars. Stored in `tenants.settings.webhookSecrets`.
 
 ### ML Pipeline (on ML service directly, not via backend)
 - `GET /pipeline/drift-report` — Feature drift status
@@ -318,8 +320,8 @@ cod-fraud-saas/
 4. **Blacklist** (`/blacklist`) — CRUD table with type tabs (all/phone/email/ip/address/name). Add form. Reason column shows info icon for long reasons → opens modal.
 5. **Scanner** (`/scanner`) — Return scanner status + history page. NO manual input field on the page itself — scanning happens globally from ANY page via `useGlobalScanner` hook in `DashboardLayout`. Physical USB/Bluetooth barcode scanner auto-submits when parcel scanned. Page shows: today's stats (scanned/returns/ML progress), "Manual Entry" collapsible section (fallback for damaged barcodes only), scan history list (tracking number, customer name, risk score, time, status). Audio beep feedback on every scan.
 6. **ML Insights** (`/ml`) — Model info, 5 performance metrics, confusion matrix (7d/30d/90d), top 10 feature importance bars, model versions table, service health, **Self-Learning Progress card** (progress bar showing unused outcomes vs 500 threshold, stats: total/delivered/returned/unused, last retrain info).
-7. **Settings** (`/settings`) — Account info, plan & usage bar, scoring threshold sliders (visual gradient bar), API key management, Platform Integrations (Shopify OAuth card + WooCommerce/Magento/Joomla/Custom webhook cards with copy URL + expandable instructions). Shopify card shows "Test Webhook" button when connected — calls `POST /shopify/test-webhook`, shows green/red result with webhook address.
-8. **Billing** (`/billing`) — Full-width. Current plan as a large gradient card with usage bar and days remaining. Plans grid (`grid-cols-1 sm:grid-cols-2 xl:grid-cols-4`) with bigger cards, popular badge, current plan ring. Improved invoice history table with hover states.
+7. **Settings** (`/settings`) — Account info, Pro Plan banner (gradient blue), scoring threshold sliders, API key management (generate/list), Platform Integrations: Shopify OAuth card + WooCommerce card (with HMAC secret input) + Custom API card. Billing removed — all users are Pro. Shopify card shows "Test Webhook" button when connected. WooCommerce delivery URL shows `?api_key=YOUR_API_KEY` placeholder, Secret field = HMAC signing key stored via `PUT /settings/webhook-secrets`.
+8. **Billing** (`/billing`) — Redirects to `/settings`. No billing page — all users are Pro.
 8. **Login** (`/login`) — Split-screen: left dark panel (hidden on mobile) with custom SVG shield logo + feature list; right white panel with form. Show/hide password, labels above inputs, responsive tab switcher.
 
 ## UI Components
@@ -347,6 +349,7 @@ mlApi        — metrics, confusionMatrix, threshold, versions, health, performa
 analyticsApi — dashboard, rtoReport, submitFeedback, overrideStats, performance
 scannerApi   — scan(tracking_number), lookup(tracking_number)
 shopifyApi   — status, disconnect, testWebhook
+settingsApi  — getWebhookSecrets(), saveWebhookSecret(platform, secret)
 ```
 
 ## Common Commands
@@ -477,6 +480,31 @@ Orders survive any single point of failure:
 - **Historical backfill**: After OAuth success, last 50 Shopify orders are fetched + scored in background (fire-and-forget).
 - **Webhook health check**: `POST /shopify/test-webhook` fetches webhook list from Shopify and confirms ours is still registered.
 
+### WooCommerce Security (Dual-Layer Auth)
+WooCommerce can't send custom HTTP headers, so auth uses two layers:
+1. **API key in URL**: Delivery URL = `https://...railway.app/api/v1/webhook/woocommerce?api_key=cfr_xxx` — identifies the tenant. Backend reads from `request.query.api_key` as fallback to `x-api-key` header.
+2. **HMAC signature**: WooCommerce Secret field sends `X-WC-Webhook-Signature: base64(HMAC-SHA256(body, secret))`. Same secret saved via `PUT /settings/webhook-secrets`. If secret is configured, backend rejects requests with invalid/missing signature with 401. If no secret configured, signature check is skipped (more permissive for setup).
+- **Secrets storage**: In `tenants.settings.webhookSecrets` JSON: `{"woocommerce":"...", "magento":"..."}`. GET endpoint returns only boolean flags (never exposes actual secret value). Same pattern for Magento/Joomla.
+- **HMAC parsing fix**: `t.settings->>'webhookSecrets'` returns TEXT from PostgreSQL. Must `JSON.parse()` before accessing `[platform]` key. Already implemented in `webhook.routes.ts`.
+
+### Plan
+- **Single Pro plan**: All users get full capacity. `GET /auth/plan` returns `{plan:'pro', limit:0}`. No tiered billing. Sidebar shows "Pro" badge. `/billing` page redirects to `/settings`.
+
+### Environment Variables Required (Railway Backend)
+| Variable | Purpose | Required |
+|---|---|---|
+| `SHOPIFY_CLIENT_SECRET` | Validate Shopify webhook HMAC | **YES — add to Railway** |
+| `SHOPIFY_CLIENT_ID` | Shopify OAuth install flow | YES |
+| `API_KEY_ENCRYPTION_SECRET` | AES-256 encrypt Shopify access tokens | YES |
+| `JWT_SECRET` | JWT token signing | YES |
+| `DATABASE_URL` | PostgreSQL connection | YES |
+| `REDIS_URL` | Redis (BullMQ + cache) | YES |
+| `ML_SERVICE_URL` | ML prediction service URL | YES |
+| `CORS_ORIGINS` | Allowed frontend URLs | YES |
+| `DB_POOL_MAX` | DB pool size (default 20, set 30 for peak) | optional |
+| `QUEUE_CONCURRENCY` | Parallel scoring workers (default 5) | optional |
+| `WEBHOOK_RATE_LIMIT_MAX` | Webhook req/min per API key (default 2000) | optional |
+
 ## Known Fixed Issues (Don't Re-Introduce)
 - BullMQ Redis must include password from URL (`scoring-queue.ts` line 13-18)
 - **ML Dockerfile must NOT train** — training was removed to avoid build timeouts. Training is now done offline via `scripts/train_offline.py`, model committed to `models/`
@@ -502,6 +530,11 @@ Orders survive any single point of failure:
 - **Mandatory HMAC for Shopify webhooks** — `POST /webhook/shopify` requires valid `x-shopify-hmac-sha256` header using `SHOPIFY_CLIENT_SECRET`. Returns 503 if secret not configured, 401 if signature invalid. Not optional.
 - **Recovery cron is always running** — `server.ts` starts `setInterval(runRecoveryCron, 5 * 60 * 1000)` alongside the auto-delivered cron. Both cleared on `SIGTERM`/`SIGINT`. If you add new cron jobs, follow the same pattern.
 - **Scoring queue dedup key lifetime**: `score_dedup_{orderId}` has 600s (10 min) TTL. After DLQ (3 failed attempts), dedup key is explicitly deleted so recovery cron can re-queue. After successful scoring, key expires naturally.
+- **`POST /ml/threshold` accepts both camelCase and snake_case** — body can have `blockThreshold`/`verifyThreshold` OR `block_threshold`/`verify_threshold`. Frontend sends snake_case, backend accepts both via `body.blockThreshold ?? body.block_threshold`.
+- **WooCommerce webhook_secrets JSON parsing** — `t.settings->>'webhookSecrets'` returns TEXT from PostgreSQL. In `webhook.routes.ts` the value must be `JSON.parse()`'d before accessing `[platform]` key. Already fixed — do NOT revert to direct bracket access on the raw string.
+- **Magento and Joomla removed from Settings UI** — these platforms are hidden from the Platform Integrations section. Only Shopify, WooCommerce, and Custom API cards are shown. Backend plugins and routes remain (for future use).
+- **`POST /auth/api-keys` requires non-empty body** — Fastify rejects Content-Type: application/json with empty body (`FST_ERR_CTP_EMPTY_JSON_BODY`). Always call as `api.post('/auth/api-keys', {})` not `api.post('/auth/api-keys')`.
+- **Secrets never exposed in API response** — `GET /settings/webhook-secrets` returns only `{configured: {woocommerce: true}}` — boolean flags. The actual secret string is never returned. This is intentional security design.
 
 ## Shopify Extension Setup (Pending)
 The `shopify-extension/` directory is ready but needs:

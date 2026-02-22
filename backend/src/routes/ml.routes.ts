@@ -165,7 +165,10 @@ export async function mlRoutes(app: FastifyInstance): Promise<void> {
   // POST /ml/threshold - Update scoring thresholds
   app.post('/threshold', async (request: FastifyRequest, reply: FastifyReply) => {
     const tenantId = (request as any).tenantId;
-    const { blockThreshold, verifyThreshold } = request.body as any;
+    const body = request.body as any;
+    // Accept both camelCase and snake_case for compatibility
+    const blockThreshold = body.blockThreshold ?? body.block_threshold;
+    const verifyThreshold = body.verifyThreshold ?? body.verify_threshold;
 
     if (blockThreshold !== undefined && (blockThreshold < 0 || blockThreshold > 100)) {
       return reply.code(400).send({ error: 'blockThreshold must be 0-100' });
