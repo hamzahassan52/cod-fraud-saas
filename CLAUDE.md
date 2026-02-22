@@ -42,6 +42,7 @@
 
 ### Environment Variables
 - **Backend (Railway)**: `DATABASE_URL` (Postgres public URL), `REDIS_URL` (Redis public URL), `JWT_SECRET`, `ML_SERVICE_URL` (ML internal or public URL), `CORS_ORIGINS` (Vercel frontend URL), `API_KEY_ENCRYPTION_SECRET`, `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET`, `SHOPIFY_SCOPES`
+- **New performance/capacity vars (Railway)**: `DB_POOL_MAX` (default 20, set 30 for sales days), `QUEUE_CONCURRENCY` (default 5, set 8 for sales days), `QUEUE_RATE_LIMIT` (default 100 jobs/sec), `WEBHOOK_RATE_LIMIT_MAX` (default 2000 req/min per API key)
 - **ML Service (Railway)**: `PORT` (Railway sets dynamically), `DATABASE_URL`, `CORS_ORIGINS`
 - **Frontend (Vercel)**: `NEXT_PUBLIC_API_URL` = `https://cod-fraud-saas-production.up.railway.app/api/v1`
 
@@ -90,8 +91,11 @@ cod-fraud-saas/
 │   │   │   │   └── index.ts       # ML HTTP client + toMLFeatures() — maps 48 features
 │   │   │   ├── training/
 │   │   │   │   └── training-events.ts # createTrainingEvent, updatePhoneStats, getTrainingStats, shouldTriggerRetrain
+│   │   │   ├── crypto/
+│   │   │   │   └── token-encryption.ts # AES-256-GCM encrypt/decrypt for Shopify access tokens
 │   │   │   ├── cron/
-│   │   │   │   └── auto-delivered.ts  # Nightly cron: marks dispatched orders >7 days old as delivered (label=0)
+│   │   │   │   ├── auto-delivered.ts  # Nightly cron: marks dispatched orders >7 days old as delivered (label=0)
+│   │   │   │   └── recovery.ts        # Every-5-min cron: re-queues orders stuck in 'pending' > 5 min (max 3 attempts)
 │   │   │   ├── phone-normalizer/  # Pakistani phone normalization (+92, 03xx)
 │   │   │   ├── cache/             # Redis caching service
 │   │   │   ├── queue/
@@ -206,7 +210,11 @@ cod-fraud-saas/
 - **Queue**: BullMQ for async order scoring — plan-based priority (enterprise=1, free=5)
 - **ML Pipeline**: Data collection → validation → versioning → training → drift detection → auto-retrain
 - **Cold Start Strategy**: Synthetic 30K samples → gradually replaced by real data as orders accumulate (min 3000 real labeled orders needed)
-- **Shopify OAuth**: Install → HMAC-verified callback → access_token exchange → webhook registration → saved to `shopify_connections` table
+- **Shopify OAuth**: Install → HMAC-verified callback → access_token exchange → AES-256 encrypt token → webhook registration → saved to `shopify_connections` → fire-and-forget backfill of last 50 orders
+- **DB-first ingestion**: Webhook handler writes order to PostgreSQL first (durable), then enqueues for scoring. If Redis/queue is down, recovery cron re-queues within 5 min. Zero order loss even if queue is completely unavailable.
+- **ML reliability**: Redis cache (30s TTL) for same-phone repeat orders + circuit breaker (5 failures → open, 30s reset) for ML service outage. ML down = instant fallback score (no 5s timeout per order).
+- **Queue dedup (2-layer)**: Layer 1 = Redis NX key (`score_dedup_{orderId}`, 600s TTL). Layer 2 = BullMQ `jobId: 'score_{orderId}'`. Shopify 19x webhook retries → exactly 1 scoring job.
+- **Dead-letter queue (DLQ)**: Failed jobs after 3 retries → `fraud-scoring-dlq`. DLQ handler clears dedup key so recovery cron can re-queue. Prevents permanent order loss from repeated failures.
 
 ## Database
 - PostgreSQL 16 with 17 tables (full schema: `backend/src/db/schema.sql`)
@@ -217,6 +225,7 @@ cod-fraud-saas/
   - `status` = ML/verification decision: `scored` / `approved` / `blocked` / `verified` / `rto` — these two must NEVER be mixed
 - **`training_events` table**: Immutable ML dataset. One row per order (UNIQUE on order_id). Fields: `feature_snapshot JSONB` (features at prediction time), `final_label SMALLINT` (0=delivered, 1=returned), `call_confirmed`, `model_version`, `prediction_score`, `prediction_correct BOOLEAN`, `outcome_source VARCHAR(20)` (scanner/cron), `used_in_training BOOLEAN DEFAULT FALSE`
 - **`retrain_jobs` table**: History of every retraining run with before/after F1, AUC, model version, promotion decision and reason
+- **`shopify_connections` table**: Added `token_encrypted TEXT` column (AES-256-GCM encrypted token). `access_token` stores `'[encrypted]'` placeholder. Migration auto-encrypts existing plaintext tokens on first deploy.
 
 ## API Endpoints
 ### Auth
@@ -268,9 +277,10 @@ cod-fraud-saas/
 
 ### Shopify OAuth
 - `GET /api/v1/shopify/install` — Redirect to Shopify OAuth (params: shop, tenant_id)
-- `GET /api/v1/shopify/callback` — OAuth callback, HMAC verify, token exchange, webhook registration
+- `GET /api/v1/shopify/callback` — OAuth callback, HMAC verify, token exchange, webhook registration, fire-and-forget last-50-order backfill
 - `GET /api/v1/shopify/status` — Connection status (JWT auth)
-- `DELETE /api/v1/shopify/disconnect` — Remove connection (JWT auth)
+- `DELETE /api/v1/shopify/disconnect` — Remove connection + DELETE webhook from Shopify API (JWT auth)
+- `POST /api/v1/shopify/test-webhook` — Verify webhook is still registered on Shopify (JWT auth). Returns: `{success, shop, webhook_registered, webhook_id, webhook_address, webhook_topic}`
 
 ### Settings
 - `GET /api/v1/settings/thresholds` — Get current thresholds
@@ -308,7 +318,7 @@ cod-fraud-saas/
 4. **Blacklist** (`/blacklist`) — CRUD table with type tabs (all/phone/email/ip/address/name). Add form. Reason column shows info icon for long reasons → opens modal.
 5. **Scanner** (`/scanner`) — Return scanner status + history page. NO manual input field on the page itself — scanning happens globally from ANY page via `useGlobalScanner` hook in `DashboardLayout`. Physical USB/Bluetooth barcode scanner auto-submits when parcel scanned. Page shows: today's stats (scanned/returns/ML progress), "Manual Entry" collapsible section (fallback for damaged barcodes only), scan history list (tracking number, customer name, risk score, time, status). Audio beep feedback on every scan.
 6. **ML Insights** (`/ml`) — Model info, 5 performance metrics, confusion matrix (7d/30d/90d), top 10 feature importance bars, model versions table, service health, **Self-Learning Progress card** (progress bar showing unused outcomes vs 500 threshold, stats: total/delivered/returned/unused, last retrain info).
-7. **Settings** (`/settings`) — Account info, plan & usage bar, scoring threshold sliders (visual gradient bar), API key management, Platform Integrations (Shopify OAuth card + WooCommerce/Magento/Joomla/Custom webhook cards with copy URL + expandable instructions).
+7. **Settings** (`/settings`) — Account info, plan & usage bar, scoring threshold sliders (visual gradient bar), API key management, Platform Integrations (Shopify OAuth card + WooCommerce/Magento/Joomla/Custom webhook cards with copy URL + expandable instructions). Shopify card shows "Test Webhook" button when connected — calls `POST /shopify/test-webhook`, shows green/red result with webhook address.
 8. **Billing** (`/billing`) — Full-width. Current plan as a large gradient card with usage bar and days remaining. Plans grid (`grid-cols-1 sm:grid-cols-2 xl:grid-cols-4`) with bigger cards, popular badge, current plan ring. Improved invoice history table with hover states.
 8. **Login** (`/login`) — Split-screen: left dark panel (hidden on mobile) with custom SVG shield logo + feature list; right white panel with form. Show/hide password, labels above inputs, responsive tab switcher.
 
@@ -336,7 +346,7 @@ blacklistApi — list, add, remove
 mlApi        — metrics, confusionMatrix, threshold, versions, health, performanceHistory, generateSnapshot, trainingStats(), retrainJobs()
 analyticsApi — dashboard, rtoReport, submitFeedback, overrideStats, performance
 scannerApi   — scan(tracking_number), lookup(tracking_number)
-shopifyApi   — status, disconnect
+shopifyApi   — status, disconnect, testWebhook
 ```
 
 ## Common Commands
@@ -443,6 +453,30 @@ The system collects real delivery outcomes to continuously improve the ML model:
 - Finds orders with `final_status = 'dispatched'` AND `dispatched_at < NOW() - 7 days`
 - Creates `training_event(label=0, outcome_source='cron')` + updates phone stats
 
+## Security & Reliability Architecture
+
+### Zero Order Loss System
+Orders survive any single point of failure:
+1. **Webhook handler** writes order to PostgreSQL immediately (durable). Returns 202 before scoring.
+2. **enqueueScoring** adds to BullMQ with Redis dedup (NX key, 600s TTL) + BullMQ jobId dedup.
+3. **BullMQ worker** scores order, writes `fraud_scores` + `prediction_logs` + `risk_logs`, sets `status='scored'`.
+4. **If worker fails** → BullMQ retries 3x (exponential backoff 2s). After 3 failures → DLQ. DLQ clears dedup key.
+5. **Recovery cron** (every 5 min) → finds `status='pending'` orders older than 5 min → re-queues (max 3 attempts via Redis counter `score_recovery_count_{orderId}`, 24h TTL).
+6. **Result**: Redis down? Orders in DB, recovery re-queues. Worker crash? BullMQ retries + recovery. Queue full? Orders wait in DB, never lost.
+
+### ML Reliability (Pakistani Sales Days: Eid, 11.11, Black Friday)
+- **Redis cache** (`ml_pred_{phone}_{amtBucket}`, 30s TTL): same phone + similar amount = 1 ML call + cache hits. Reduces ML load 60-80% on flash-fraud days.
+- **Circuit breaker**: 5 ML failures → circuit opens → instant `score=50` fallback (no 5s timeout). After 30s → half-open → 1 probe → auto-recovery.
+- **Queue rate limiter**: `QUEUE_RATE_LIMIT` jobs/sec max. `QUEUE_CONCURRENCY` parallel workers.
+- **DB pool**: `DB_POOL_MAX` (env-configurable, default 20).
+
+### Shopify Security
+- **Access token**: Encrypted with AES-256-GCM (`token_encryption.ts`). Key = SHA-256 of `API_KEY_ENCRYPTION_SECRET`. Format: `iv_hex:authTag_hex:ciphertext_hex`.
+- **HMAC verification**: Every `POST /webhook/shopify` validates `x-shopify-hmac-sha256` header. Forged webhooks rejected with 401.
+- **Webhook cleanup**: `DELETE /shopify/disconnect` calls Shopify API to delete registered webhook before removing DB record.
+- **Historical backfill**: After OAuth success, last 50 Shopify orders are fetched + scored in background (fire-and-forget).
+- **Webhook health check**: `POST /shopify/test-webhook` fetches webhook list from Shopify and confirms ours is still registered.
+
 ## Known Fixed Issues (Don't Re-Introduce)
 - BullMQ Redis must include password from URL (`scoring-queue.ts` line 13-18)
 - **ML Dockerfile must NOT train** — training was removed to avoid build timeouts. Training is now done offline via `scripts/train_offline.py`, model committed to `models/`
@@ -463,6 +497,11 @@ The system collects real delivery outcomes to continuously improve the ML model:
 - **Scanner does NOT need its own input field** — `useGlobalScanner` in `DashboardLayout` captures from any page. The `/scanner` page is for history + manual fallback only, not for primary scanning
 - **Do not add input auto-focus to scanner page** — focus should stay free so global scanner can always capture barcode input from any page
 - **Physical barcode scanner = keyboard emulator** — no library (ZXing, QuaggaJS, etc.) needed for hardware scanners. Libraries are only for camera-based scanning which is less reliable in warehouse settings
+- **BullMQ jobId CANNOT contain colons (`:`)** — BullMQ throws `"Custom Id cannot contain ':'"`. ALL Redis keys and BullMQ jobIds must use underscores. Examples: `score_${orderId}`, `score_dedup_${orderId}`, `score_recovery_count_${orderId}`, `wh_rl_${apiKey}_${minute}`, `ml_pred_${phone}_${amtBucket}`. NEVER use colons in any Redis key or BullMQ jobId.
+- **Shopify access tokens are encrypted** — `shopify_connections.token_encrypted` holds AES-256-GCM ciphertext. `access_token` column stores `'[encrypted]'` placeholder. Always use `decryptToken(row.token_encrypted)` before calling Shopify API. Never read `access_token` directly for API calls.
+- **Mandatory HMAC for Shopify webhooks** — `POST /webhook/shopify` requires valid `x-shopify-hmac-sha256` header using `SHOPIFY_CLIENT_SECRET`. Returns 503 if secret not configured, 401 if signature invalid. Not optional.
+- **Recovery cron is always running** — `server.ts` starts `setInterval(runRecoveryCron, 5 * 60 * 1000)` alongside the auto-delivered cron. Both cleared on `SIGTERM`/`SIGINT`. If you add new cron jobs, follow the same pattern.
+- **Scoring queue dedup key lifetime**: `score_dedup_{orderId}` has 600s (10 min) TTL. After DLQ (3 failed attempts), dedup key is explicitly deleted so recovery cron can re-queue. After successful scoring, key expires naturally.
 
 ## Shopify Extension Setup (Pending)
 The `shopify-extension/` directory is ready but needs:
