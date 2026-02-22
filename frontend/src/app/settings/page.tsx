@@ -1,10 +1,9 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { mlApi, shopifyApi } from '@/lib/api';
 import DashboardLayout from '@/components/layout/dashboard-layout';
 import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Modal } from '@/components/ui/modal';
 import clsx from 'clsx';
 import api from '@/lib/api';
@@ -14,14 +13,6 @@ interface UserProfile {
   email: string;
   tenant: string;
   tenant_id: string;
-}
-
-interface PlanInfo {
-  plan: string;
-  usage: number;
-  limit: number;
-  billing_cycle_start: string;
-  billing_cycle_end: string;
 }
 
 interface ApiKey {
@@ -36,9 +27,6 @@ export default function SettingsPage() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
 
-  // Plan
-  const [plan, setPlan] = useState<PlanInfo | null>(null);
-  const [planLoading, setPlanLoading] = useState(true);
 
   // Thresholds
   const [blockThreshold, setBlockThreshold] = useState(70);
@@ -68,7 +56,6 @@ export default function SettingsPage() {
 
   useEffect(() => {
     fetchProfile();
-    fetchPlan();
     fetchApiKeys();
     fetchThresholds();
     fetchShopifyStatus();
@@ -97,19 +84,6 @@ export default function SettingsPage() {
       }
     } finally {
       setProfileLoading(false);
-    }
-  };
-
-  const fetchPlan = async () => {
-    setPlanLoading(true);
-    try {
-      const res = await api.get('/auth/plan');
-      setPlan(res.data.plan || res.data);
-    } catch {
-      // Fallback
-      setPlan(null);
-    } finally {
-      setPlanLoading(false);
     }
   };
 
@@ -163,7 +137,7 @@ export default function SettingsPage() {
     setNewKey(null);
     try {
       const res = await api.post('/auth/api-keys');
-      const key = res.data.key || res.data.api_key;
+      const key = res.data.apiKey || res.data.key || res.data.api_key;
       setNewKey(key);
       await fetchApiKeys();
     } catch (err: any) {
@@ -253,8 +227,6 @@ export default function SettingsPage() {
     setTimeout(() => setCopiedWebhookUrl(null), 2000);
   };
 
-  const usagePercent = plan ? Math.min((plan.usage / plan.limit) * 100, 100) : 0;
-
   return (
     <DashboardLayout>
       <div className="p-6 space-y-6">
@@ -291,63 +263,42 @@ export default function SettingsPage() {
         </Card>
 
         {/* Plan Info */}
-        <Card title="Plan & Usage">
-          {planLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
-            </div>
-          ) : plan ? (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h4 className="text-lg font-semibold text-gray-900 dark:text-slate-100 capitalize">{plan.plan} Plan</h4>
-                    <Badge variant={
-                      plan.plan === 'enterprise' ? 'info' :
-                      plan.plan === 'growth' ? 'success' :
-                      plan.plan === 'starter' ? 'warning' : 'neutral'
-                    }>
-                      {plan.plan.toUpperCase()}
-                    </Badge>
-                  </div>
-                  <p className="text-sm text-gray-500 dark:text-slate-400 mt-0.5">
-                    Billing cycle: {plan.billing_cycle_start ? new Date(plan.billing_cycle_start).toLocaleDateString() : 'N/A'}
-                    {' - '}
-                    {plan.billing_cycle_end ? new Date(plan.billing_cycle_end).toLocaleDateString() : 'N/A'}
-                  </p>
-                </div>
+        <div className="rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 p-6 text-white">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/20 text-2xl">
+                ⚡
               </div>
-
               <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-sm text-gray-600 dark:text-slate-400">
-                    {plan.usage.toLocaleString()} / {plan.limit.toLocaleString()} orders used
-                  </span>
-                  <span className={clsx(
-                    'text-sm font-semibold',
-                    usagePercent >= 90 ? 'text-red-600 dark:text-red-400' : usagePercent >= 70 ? 'text-yellow-600 dark:text-yellow-400' : 'text-gray-900 dark:text-slate-100'
-                  )}>
-                    {usagePercent.toFixed(0)}%
-                  </span>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-xl font-bold">Pro Plan</h3>
+                  <span className="rounded-full bg-white/20 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide">Active</span>
                 </div>
-                <div className="w-full bg-gray-100 dark:bg-slate-700 rounded-full h-3">
-                  <div
-                    className={clsx(
-                      'h-3 rounded-full transition-all duration-500',
-                      usagePercent >= 90 ? 'bg-red-500' : usagePercent >= 70 ? 'bg-yellow-500' : 'bg-blue-500'
-                    )}
-                    style={{ width: `${usagePercent}%` }}
-                  />
-                </div>
+                <p className="text-sm text-blue-100 mt-0.5">Full capacity — unlimited orders, all features, priority scoring</p>
               </div>
             </div>
-          ) : (
-            <div className="text-center py-4">
-              <p className="text-sm text-gray-500 dark:text-slate-400">Plan information not available</p>
-              <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">Contact support for plan details</p>
+            <div className="flex flex-col items-start sm:items-end gap-1">
+              <div className="flex items-center gap-1.5">
+                <svg className="h-4 w-4 text-green-300" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                </svg>
+                <span className="text-sm text-blue-100">Unlimited order scoring</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <svg className="h-4 w-4 text-green-300" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                </svg>
+                <span className="text-sm text-blue-100">ML + circuit breaker + zero order loss</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <svg className="h-4 w-4 text-green-300" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                </svg>
+                <span className="text-sm text-blue-100">Shopify, WooCommerce, Magento, Joomla</span>
+              </div>
             </div>
-          )}
-        </Card>
+          </div>
+        </div>
 
         {/* Scoring Thresholds */}
         <Card title="Scoring Thresholds" subtitle="Configure the risk score thresholds for automatic recommendations">

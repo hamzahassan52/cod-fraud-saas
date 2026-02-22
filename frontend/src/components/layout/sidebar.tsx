@@ -85,23 +85,8 @@ const navItems: NavItem[] = [
       </svg>
     ),
   },
-  {
-    label: 'Billing',
-    href: '/billing',
-    icon: (
-      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" />
-      </svg>
-    ),
-  },
 ];
 
-const planColors: Record<string, string> = {
-  free: 'bg-gray-600 text-gray-200',
-  starter: 'bg-blue-600 text-blue-100',
-  growth: 'bg-purple-600 text-purple-100',
-  enterprise: 'bg-amber-600 text-amber-100',
-};
 
 export function Sidebar({ open, onClose, collapsed, onCollapsedChange }: SidebarProps) {
   const pathname = usePathname();
@@ -151,11 +136,9 @@ export function Sidebar({ open, onClose, collapsed, onCollapsedChange }: Sidebar
               <p className="truncate text-sm font-semibold text-white">
                 {tenant?.companyName || 'COD Fraud Shield'}
               </p>
-              {tenant?.plan && (
-                <span className={clsx('mt-0.5 inline-block rounded px-1.5 py-0.5 text-[10px] font-medium uppercase', planColors[tenant.plan] || planColors.free)}>
-                  {tenant.plan}
-                </span>
-              )}
+              <span className="mt-0.5 inline-block rounded px-1.5 py-0.5 text-[10px] font-medium uppercase bg-blue-600 text-blue-100">
+                Pro
+              </span>
             </div>
           )}
           {showFull && (

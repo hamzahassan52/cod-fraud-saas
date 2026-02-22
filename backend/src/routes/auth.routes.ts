@@ -114,12 +114,58 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
+  const jwtAuth = async (req: FastifyRequest, rep: FastifyReply) => {
+    try { await req.jwtVerify(); } catch { rep.code(401).send({ error: 'Unauthorized' }); }
+  };
+
+  // GET /auth/profile
+  app.get('/profile', { onRequest: [jwtAuth] }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const decoded = request.user as any;
+    const result = await query(
+      `SELECT u.id, u.name, u.email, u.role, t.name as tenant_name, t.id as tenant_id
+       FROM users u JOIN tenants t ON t.id = u.tenant_id
+       WHERE u.id = $1`,
+      [decoded.userId]
+    );
+    if (result.rows.length === 0) return reply.code(404).send({ error: 'User not found' });
+    const u = result.rows[0];
+    return reply.send({
+      user: { id: u.id, name: u.name, email: u.email, role: u.role },
+      tenant: u.tenant_name,
+      tenant_id: u.tenant_id,
+    });
+  });
+
+  // GET /auth/plan
+  app.get('/plan', { onRequest: [jwtAuth] }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const decoded = request.user as any;
+    const result = await query(
+      `SELECT orders_used FROM tenants WHERE id = $1`,
+      [decoded.tenantId]
+    );
+    const usage = result.rows[0]?.orders_used || 0;
+    return reply.send({
+      plan: 'pro',
+      usage,
+      limit: 0,
+      billing_cycle_start: null,
+      billing_cycle_end: null,
+    });
+  });
+
+  // GET /auth/api-keys
+  app.get('/api-keys', { onRequest: [jwtAuth] }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const decoded = request.user as any;
+    const result = await query(
+      `SELECT id, key_prefix as prefix, name, created_at, last_used_at
+       FROM api_keys WHERE tenant_id = $1 AND is_active = true ORDER BY created_at DESC`,
+      [decoded.tenantId]
+    );
+    return reply.send({ keys: result.rows });
+  });
+
   // POST /auth/api-keys - Generate new API key
-  app.post('/api-keys', {
-    onRequest: [async (req, rep) => {
-      try { await req.jwtVerify(); } catch { rep.code(401).send({ error: 'Unauthorized' }); }
-    }],
-  }, async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post('/api-keys', { onRequest: [jwtAuth] }, async (request: FastifyRequest, reply: FastifyReply) => {
     const decoded = request.user as any;
     const { name } = (request.body as any) || { name: 'New Key' };
 
@@ -135,6 +181,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
     return reply.code(201).send({
       apiKey: rawKey,
+      key: rawKey,
       prefix: keyPrefix,
       message: 'Save this key securely. It cannot be retrieved again.',
     });
