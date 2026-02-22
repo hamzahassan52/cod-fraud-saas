@@ -21,8 +21,8 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
     try {
       const redis = await getRedis();
       const minute = Math.floor(Date.now() / 60000);
-      const cnt = await redis.incr(`wh:rl:${apiKey}:${minute}`);
-      if (cnt === 1) await redis.expire(`wh:rl:${apiKey}:${minute}`, 120);
+      const cnt = await redis.incr(`wh_rl_${apiKey}_${minute}`);
+      if (cnt === 1) await redis.expire(`wh_rl_${apiKey}_${minute}`, 120);
       if (cnt > config.rateLimit.webhookMax) {
         return reply.code(429).send({
           error: 'Webhook rate limit exceeded',

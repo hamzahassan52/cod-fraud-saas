@@ -41,7 +41,7 @@ export async function runRecoveryCron(): Promise<void> {
     try {
       // Check recovery attempt count to prevent infinite loops
       if (redis) {
-        const countKey = `score:recovery:count:${order.id}`;
+        const countKey = `score_recovery_count_${order.id}`;
         const count = await redis.incr(countKey);
         await redis.expire(countKey, 86400); // 24h TTL
         if (count > MAX_RECOVERY_ATTEMPTS) {

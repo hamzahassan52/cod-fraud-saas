@@ -52,7 +52,7 @@ export class MLClient {
     // Cache key: phone + amount bucket (30s TTL)
     const phone = features.normalizedPhone?.normalized || '';
     const amtBucket = Math.floor((mlFeatures.order_amount || 0) / 500) * 500;
-    const cacheKey = phone ? `ml:pred:${phone}:${amtBucket}` : null;
+    const cacheKey = phone ? `ml_pred_${phone}_${amtBucket}` : null;
 
     // Check cache first
     if (cacheKey) {

@@ -52,7 +52,7 @@ export async function enqueueScoring(
   // Layer 1: Redis dedup — first enqueue wins, 10 min window
   try {
     const redis = await getRedis();
-    const key = `score:dedup:${orderId}`;
+    const key = `score_dedup_${orderId}`;
     const isNew = await redis.set(key, '1', { NX: true, EX: 600 });
     if (!isNew) return; // Already queued or being processed
   } catch { /* Redis down = fail open, allow enqueue */ }
@@ -64,7 +64,7 @@ export async function enqueueScoring(
     await scoringQueue.add(
       'score-order',
       { orderId, tenantId, enqueuedAt: Date.now() },
-      { priority, jobId: `score:${orderId}` }
+      { priority, jobId: `score_${orderId}` }
     );
   } catch (err: any) {
     // jobId already exists = already queued = fine
@@ -204,7 +204,7 @@ export function startScoringWorker(): Worker {
       // Clear dedup key so recovery cron can re-queue this order
       try {
         const redis = await getRedis();
-        await redis.del(`score:dedup:${job.data.orderId}`);
+        await redis.del(`score_dedup_${job.data.orderId}`);
       } catch { /* Non-fatal */ }
     }
   });
