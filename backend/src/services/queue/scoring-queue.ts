@@ -200,6 +200,12 @@ export function startScoringWorker(): Worker {
       } catch (dlqErr: any) {
         console.error(`[DLQ] Failed to enqueue to DLQ:`, dlqErr.message);
       }
+
+      // Clear dedup key so recovery cron can re-queue this order
+      try {
+        const redis = await getRedis();
+        await redis.del(`score:dedup:${job.data.orderId}`);
+      } catch { /* Non-fatal */ }
     }
   });
 
