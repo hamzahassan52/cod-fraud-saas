@@ -184,6 +184,8 @@ export default function SettingsPage() {
     try {
       await settingsApi.saveWebhookSecret(platform, secret);
       setWebhookSecretConfigured(prev => ({ ...prev, [platform]: true }));
+      // Re-fetch to confirm saved in DB
+      await fetchWebhookSecrets();
     } catch (err: any) {
       alert(err.response?.data?.error || 'Failed to save webhook secret');
     } finally {
@@ -714,6 +716,7 @@ function WebhookPlatformCard({
 
   const [secretInput, setSecretInput] = useState('');
   const [showSecret, setShowSecret] = useState(false);
+  const [justSaved, setJustSaved] = useState(false);
 
   return (
     <div className="rounded-xl border border-gray-200 dark:border-slate-700 p-4">
@@ -767,25 +770,40 @@ function WebhookPlatformCard({
 
       {/* HMAC Secret management (for non-Shopify platforms) */}
       {onSaveSecret && (
-        <div className="mt-3 rounded-lg border border-gray-100 dark:border-slate-600/50 p-3">
+        <div className={clsx(
+          'mt-3 rounded-lg border p-3 transition-colors',
+          secretConfigured
+            ? 'border-green-200 dark:border-green-800/50 bg-green-50/50 dark:bg-green-900/10'
+            : 'border-gray-100 dark:border-slate-600/50'
+        )}>
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-1.5">
-              <svg className="w-3.5 h-3.5 text-gray-500 dark:text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className={clsx('w-3.5 h-3.5', secretConfigured ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-slate-400')} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
               </svg>
-              <p className="text-xs font-medium text-gray-700 dark:text-slate-300">Webhook HMAC Secret</p>
+              <p className={clsx('text-xs font-medium', secretConfigured ? 'text-green-700 dark:text-green-400' : 'text-gray-700 dark:text-slate-300')}>
+                Webhook HMAC Secret
+              </p>
             </div>
             {secretConfigured && (
-              <span className="flex items-center gap-1 text-[10px] text-green-700 dark:text-green-400">
+              <span className="flex items-center gap-1 rounded-full bg-green-100 dark:bg-green-900/30 px-2 py-0.5 text-xs font-medium text-green-700 dark:text-green-400">
                 <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                 </svg>
-                Configured
+                Secret Saved
               </span>
             )}
           </div>
+
+          {/* Success banner after save */}
+          {justSaved && (
+            <div className="mb-2 rounded-lg bg-green-100 dark:bg-green-900/30 px-3 py-2 text-xs text-green-800 dark:text-green-300 font-medium">
+              ✅ Secret saved! Now enter this same value in WooCommerce Secret field.
+            </div>
+          )}
+
           <p className="text-[11px] text-gray-500 dark:text-slate-400 mb-2">
-            Set the same secret in your platform&apos;s webhook settings. We&apos;ll use it to verify every request is genuinely from your store.
+            Enter the same value in your platform&apos;s webhook &quot;Secret&quot; field. Every request will be verified — forged orders are rejected.
           </p>
           <div className="flex items-center gap-2">
             <div className="relative flex-1">
@@ -793,7 +811,7 @@ function WebhookPlatformCard({
                 type={showSecret ? 'text' : 'password'}
                 value={secretInput}
                 onChange={(e) => setSecretInput(e.target.value)}
-                placeholder={secretConfigured ? '••••••••  (set — enter new to update)' : 'Enter a strong secret (min 8 chars)'}
+                placeholder={secretConfigured ? 'Secret saved — enter new value to update' : 'Enter a secret (min 8 chars)'}
                 className="w-full rounded-lg border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 px-2.5 py-1.5 pr-8 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
               <button
@@ -818,6 +836,8 @@ function WebhookPlatformCard({
                 if (secretInput.trim().length >= 8) {
                   onSaveSecret(secretInput.trim());
                   setSecretInput('');
+                  setJustSaved(true);
+                  setTimeout(() => setJustSaved(false), 5000);
                 }
               }}
               disabled={savingSecret || secretInput.trim().length < 8}
@@ -826,6 +846,9 @@ function WebhookPlatformCard({
               {savingSecret ? 'Saving…' : 'Save'}
             </button>
           </div>
+          {secretInput.length > 0 && secretInput.trim().length < 8 && (
+            <p className="mt-1 text-[11px] text-red-500">Minimum 8 characters required</p>
+          )}
         </div>
       )}
 
