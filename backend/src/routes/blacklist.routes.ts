@@ -33,11 +33,12 @@ export async function blacklistRoutes(app: FastifyInstance): Promise<void> {
       ? new Date(Date.now() + body.expiresInDays * 86400000).toISOString()
       : null;
 
-    await query(
+    const insertResult = await query(
       `INSERT INTO blacklist (tenant_id, type, value, value_normalized, reason, added_by, expires_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        ON CONFLICT (tenant_id, type, value_normalized) DO UPDATE SET
-         reason = EXCLUDED.reason, expires_at = EXCLUDED.expires_at`,
+         reason = EXCLUDED.reason, expires_at = EXCLUDED.expires_at
+       RETURNING id`,
       [tenantId, body.type, body.value, normalized, body.reason, request.userId, expiresAt]
     );
 
@@ -49,7 +50,7 @@ export async function blacklistRoutes(app: FastifyInstance): Promise<void> {
       );
     }
 
-    return reply.code(201).send({ success: true, type: body.type, normalized });
+    return reply.code(201).send({ success: true, id: insertResult.rows[0]?.id, type: body.type, normalized });
   });
 
   // GET /blacklist - List blacklisted items
