@@ -6,8 +6,8 @@ let pool: Pool;
 export function getPool(): Pool {
   if (!pool) {
     pool = new Pool({
-      connectionString: config.db.url,
-      max: 20,
+      connectionString: config.db.url as string,
+      max: config.db.poolMax,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 5000,
     });

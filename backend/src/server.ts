@@ -5,6 +5,7 @@ import { closePool } from './db/connection';
 import { closeRedis } from './services/cache/redis';
 import { generateAllSnapshots } from './services/performance-tracker';
 import { runAutoDeliveredCron } from './services/cron/auto-delivered';
+import { runRecoveryCron } from './services/cron/recovery';
 
 async function main() {
   const app = await buildApp();
@@ -61,11 +62,22 @@ async function main() {
   }, 5 * 60 * 1000); // Check every 5 minutes
   console.log('Auto-delivered cron scheduled (runs nightly at 2:00 AM UTC)');
 
+  // Recovery cron: re-queue unscored orders every 5 minutes (zero order loss safety net)
+  const recoveryInterval = setInterval(async () => {
+    try {
+      await runRecoveryCron();
+    } catch (err) {
+      console.error('Recovery cron failed:', err);
+    }
+  }, 5 * 60 * 1000);
+  console.log('Recovery cron scheduled (runs every 5 minutes)');
+
   // Graceful shutdown
   const shutdown = async (signal: string) => {
     console.log(`\n${signal} received. Shutting down gracefully...`);
     clearInterval(snapshotInterval);
     clearInterval(autoDeliveredInterval);
+    clearInterval(recoveryInterval);
     await worker.close();
     await app.close();
     await closeRedis();

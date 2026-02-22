@@ -7,6 +7,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { Pool } from 'pg';
+import { encryptToken } from '../services/crypto/token-encryption';
 
 const DATABASE_URL = process.env.DATABASE_URL || 'postgresql://codfraud:codfraud_secret@localhost:5432/codfraud_db';
 
@@ -49,10 +50,31 @@ async function migrate() {
           `CREATE INDEX IF NOT EXISTS idx_orders_final_status ON orders(tenant_id, final_status, created_at DESC)`,
           // Backfill: set default final_status for existing rows that have NULL
           `UPDATE orders SET final_status = 'pending' WHERE final_status IS NULL`,
+          `ALTER TABLE shopify_connections ADD COLUMN IF NOT EXISTS token_encrypted TEXT`,
         ];
 
         for (const stmt of alterStatements) {
           await pool.query(stmt);
+        }
+
+        // One-time migration: encrypt existing plaintext Shopify tokens
+        const unencrypted = await pool.query(
+          `SELECT id, access_token FROM shopify_connections
+           WHERE token_encrypted IS NULL AND access_token IS NOT NULL AND access_token != '[encrypted]'`
+        );
+        for (const row of unencrypted.rows) {
+          try {
+            const enc = encryptToken(row.access_token);
+            await pool.query(
+              `UPDATE shopify_connections SET token_encrypted = $1, access_token = '[encrypted]' WHERE id = $2`,
+              [enc, row.id]
+            );
+          } catch (e: any) {
+            console.warn(`Failed to encrypt token for row ${row.id}:`, e.message);
+          }
+        }
+        if (unencrypted.rows.length > 0) {
+          console.log(`Encrypted ${unencrypted.rows.length} existing Shopify token(s).`);
         }
 
         await pool.query(`

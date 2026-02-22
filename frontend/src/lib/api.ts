@@ -105,6 +105,7 @@ export const analyticsApi = {
 export const shopifyApi = {
   status: () => api.get('/shopify/status'),
   disconnect: () => api.delete('/shopify/disconnect'),
+  testWebhook: () => api.post('/shopify/test-webhook'),
 };
 
 export default api;

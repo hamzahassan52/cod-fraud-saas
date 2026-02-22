@@ -7,9 +7,6 @@ export const config = {
     host: process.env.HOST || '0.0.0.0',
     env: process.env.NODE_ENV || 'development',
   },
-  db: {
-    url: process.env.DATABASE_URL || 'postgresql://codfraud:codfraud_secret@localhost:5432/codfraud_db',
-  },
   redis: {
     url: process.env.REDIS_URL || 'redis://localhost:6379',
   },
@@ -28,9 +25,15 @@ export const config = {
   rateLimit: {
     max: parseInt(process.env.RATE_LIMIT_MAX || '100', 10),
     window: parseInt(process.env.RATE_LIMIT_WINDOW || '60000', 10),
+    webhookMax: parseInt(process.env.WEBHOOK_RATE_LIMIT_MAX || '2000', 10),
   },
   queue: {
     concurrency: parseInt(process.env.QUEUE_CONCURRENCY || '5', 10),
+    rateLimit: parseInt(process.env.QUEUE_RATE_LIMIT || '100', 10),
+  },
+  db: {
+    url: process.env.DATABASE_URL || 'postgresql://codfraud:codfraud_secret@localhost:5432/codfraud_db',
+    poolMax: parseInt(process.env.DB_POOL_MAX || '20', 10),
   },
   encryption: {
     apiKeySecret: process.env.API_KEY_ENCRYPTION_SECRET || 'dev-encryption-key-32-bytes-long!',

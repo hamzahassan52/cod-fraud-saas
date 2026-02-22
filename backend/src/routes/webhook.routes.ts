@@ -3,21 +3,35 @@ import { registry } from '../plugins/platform-plugin';
 import { query, transaction } from '../db/connection';
 import { enqueueScoring } from '../services/queue/scoring-queue';
 import { normalizePhone } from '../services/phone-normalizer';
-import { replayProtection, idempotencyCheck } from '../middlewares/security';
-import { enforcePlanLimits } from '../middlewares/plan-enforcement';
 import { webhookTotal } from '../services/metrics';
+import { config } from '../config';
+import { getRedis } from '../services/cache/redis';
 import { z } from 'zod';
-
-/**
- * Webhook Routes
- * POST /webhook/:platform - Receive order webhooks from e-commerce platforms
- */
 
 const platformSchema = z.object({
   platform: z.enum(['shopify', 'woocommerce', 'magento', 'joomla']),
 });
 
 export async function webhookRoutes(app: FastifyInstance): Promise<void> {
+
+  // Per-API-key rate limit for webhooks (separate from dashboard rate limit)
+  app.addHook('preHandler', async (request: FastifyRequest, reply: FastifyReply) => {
+    const apiKey = request.headers['x-api-key'] as string;
+    if (!apiKey) return;
+    try {
+      const redis = await getRedis();
+      const minute = Math.floor(Date.now() / 60000);
+      const cnt = await redis.incr(`wh:rl:${apiKey}:${minute}`);
+      if (cnt === 1) await redis.expire(`wh:rl:${apiKey}:${minute}`, 120);
+      if (cnt > config.rateLimit.webhookMax) {
+        return reply.code(429).send({
+          error: 'Webhook rate limit exceeded',
+          retryAfterSeconds: 60,
+          limit: config.rateLimit.webhookMax,
+        });
+      }
+    } catch { /* Fail open — Redis down = allow request */ }
+  });
 
   app.post<{ Params: { platform: string } }>(
     '/:platform',
@@ -69,17 +83,28 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
         });
       }
 
-      // 5. Validate webhook signature (if secret configured)
-      const webhookSecret = tenant.webhook_secrets?.[platform] || '';
-      if (webhookSecret) {
-        const rawBody = (request as any).rawBody || JSON.stringify(request.body);
-        const isValid = plugin.validateWebhook(
+      // 5. Validate webhook signature
+      const rawBody = (request as any).rawBody || JSON.stringify(request.body);
+
+      if (platform === 'shopify') {
+        if (!config.shopify.clientSecret) {
+          return reply.code(503).send({ error: 'SHOPIFY_CLIENT_SECRET not configured' });
+        }
+        const valid = plugin.validateWebhook(
           request.headers as Record<string, string>,
           rawBody,
-          webhookSecret
+          config.shopify.clientSecret
         );
-        if (!isValid) {
-          return reply.code(401).send({ error: 'Invalid webhook signature' });
+        if (!valid) return reply.code(401).send({ error: 'Invalid Shopify webhook signature' });
+      } else {
+        const secret = tenant.webhook_secrets?.[platform] || '';
+        if (secret) {
+          const valid = plugin.validateWebhook(
+            request.headers as Record<string, string>,
+            rawBody,
+            secret
+          );
+          if (!valid) return reply.code(401).send({ error: 'Invalid webhook signature' });
         }
       }
 
@@ -94,7 +119,7 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
       // 7. Normalize phone
       const phone = normalizePhone(normalizedOrder.customerPhone || '');
 
-      // 8. Insert order and enqueue scoring
+      // 8. Insert order (idempotent) and enqueue scoring
       const orderId = await transaction(async (client) => {
         const insertResult = await client.query(
           `INSERT INTO orders (
@@ -133,7 +158,6 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
           ]
         );
 
-        // Increment usage counter
         await client.query(
           'UPDATE tenants SET orders_used = orders_used + 1 WHERE id = $1',
           [tenantId]
@@ -142,13 +166,12 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
         return insertResult.rows[0].id;
       });
 
-      // 9. Enqueue for background scoring (plan-based priority)
+      // 9. Enqueue for background scoring (deduped)
       await enqueueScoring(orderId, tenantId, tenant.plan);
 
-      // 10. Track webhook metric
+      // 10. Track metric
       webhookTotal.inc({ platform, status: 'accepted' });
 
-      // 11. Return immediately (scoring happens async)
       return reply.code(202).send({
         success: true,
         orderId,

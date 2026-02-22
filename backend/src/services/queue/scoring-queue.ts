@@ -2,12 +2,14 @@ import { Queue, Worker, Job } from 'bullmq';
 import { config } from '../../config';
 import { FraudEngine } from '../fraud-engine/engine';
 import { query } from '../../db/connection';
+import { getRedis } from '../cache/redis';
 import {
   fraudScoringDuration, fraudScoringTotal,
   queueWaitTime, queueJobsProcessed
 } from '../metrics';
 
 const QUEUE_NAME = 'fraud-scoring';
+const DLQ_NAME = 'fraud-scoring-dlq';
 
 const redisUrl = new URL(config.redis.url);
 const connection = {
@@ -17,7 +19,6 @@ const connection = {
   username: redisUrl.username || undefined,
 };
 
-// Queue instance
 export const scoringQueue = new Queue(QUEUE_NAME, {
   connection,
   defaultJobOptions: {
@@ -28,8 +29,14 @@ export const scoringQueue = new Queue(QUEUE_NAME, {
   },
 });
 
-// Priority: paid plans get processed first
-// BullMQ priority: lower number = higher priority
+export const dlqQueue = new Queue(DLQ_NAME, {
+  connection,
+  defaultJobOptions: {
+    removeOnComplete: { count: 500 },
+    removeOnFail: { count: 1000 },
+  },
+});
+
 const PLAN_PRIORITY: Record<string, number> = {
   enterprise: 1,
   growth: 2,
@@ -37,28 +44,40 @@ const PLAN_PRIORITY: Record<string, number> = {
   free: 5,
 };
 
-// Add order to scoring queue with plan-based priority
 export async function enqueueScoring(
   orderId: string,
   tenantId: string,
   plan: string = 'free'
 ): Promise<void> {
+  // Layer 1: Redis dedup — first enqueue wins, 10 min window
+  try {
+    const redis = await getRedis();
+    const key = `score:dedup:${orderId}`;
+    const isNew = await redis.set(key, '1', { NX: true, EX: 600 });
+    if (!isNew) return; // Already queued or being processed
+  } catch { /* Redis down = fail open, allow enqueue */ }
+
   const priority = PLAN_PRIORITY[plan] || 5;
-  await scoringQueue.add(
-    'score-order',
-    { orderId, tenantId, enqueuedAt: Date.now() },
-    { priority }
-  );
+
+  // Layer 2: BullMQ jobId dedup
+  try {
+    await scoringQueue.add(
+      'score-order',
+      { orderId, tenantId, enqueuedAt: Date.now() },
+      { priority, jobId: `score:${orderId}` }
+    );
+  } catch (err: any) {
+    // jobId already exists = already queued = fine
+    if (!err.message?.includes('already')) throw err;
+  }
 }
 
-// Worker that processes scoring jobs
 export function startScoringWorker(): Worker {
   const worker = new Worker(
     QUEUE_NAME,
     async (job: Job) => {
       const { orderId, tenantId, enqueuedAt } = job.data;
 
-      // Track queue wait time
       if (enqueuedAt) {
         queueWaitTime.observe(Date.now() - enqueuedAt);
       }
@@ -76,7 +95,6 @@ export function startScoringWorker(): Worker {
       const engine = new FraudEngine(tenantId);
       const result = await engine.scoreOrder(order);
 
-      // Update order with score
       await query(
         `UPDATE orders SET
           risk_score = $1,
@@ -99,7 +117,6 @@ export function startScoringWorker(): Worker {
         ]
       );
 
-      // Insert fraud score breakdown
       await query(
         `INSERT INTO fraud_scores
           (order_id, tenant_id, rule_score, statistical_score, ml_score, final_score, confidence, signals, ml_features, ml_model_version, scoring_duration_ms)
@@ -119,7 +136,6 @@ export function startScoringWorker(): Worker {
         ]
       );
 
-      // Insert prediction log (full ML audit trail)
       await query(
         `INSERT INTO prediction_logs
           (order_id, tenant_id, risk_score, recommendation, rule_score, statistical_score, ml_score,
@@ -146,7 +162,6 @@ export function startScoringWorker(): Worker {
         ]
       );
 
-      // Log the scoring action
       await query(
         `INSERT INTO risk_logs (tenant_id, order_id, action, actor_type, new_state)
         VALUES ($1, $2, 'scored', 'system', $3)`,
@@ -158,7 +173,7 @@ export function startScoringWorker(): Worker {
     {
       connection,
       concurrency: config.queue.concurrency,
-      limiter: { max: 50, duration: 1000 },
+      limiter: { max: config.queue.rateLimit, duration: 1000 },
     }
   );
 
@@ -167,9 +182,25 @@ export function startScoringWorker(): Worker {
     console.log(`Scoring completed for order ${job.data.orderId}`);
   });
 
-  worker.on('failed', (job, err) => {
+  worker.on('failed', async (job, err) => {
     queueJobsProcessed.inc({ status: 'failed' });
     console.error(`Scoring failed for order ${job?.data.orderId}:`, err.message);
+
+    // Move to DLQ after all retries exhausted
+    if (job && job.attemptsMade >= (job.opts.attempts || 3)) {
+      try {
+        await dlqQueue.add('failed-order', {
+          orderId: job.data.orderId,
+          tenantId: job.data.tenantId,
+          failedAt: new Date().toISOString(),
+          error: err.message,
+          attempts: job.attemptsMade,
+        });
+        console.warn(`[DLQ] Order ${job.data.orderId} moved to dead-letter queue after ${job.attemptsMade} attempts`);
+      } catch (dlqErr: any) {
+        console.error(`[DLQ] Failed to enqueue to DLQ:`, dlqErr.message);
+      }
+    }
   });
 
   return worker;

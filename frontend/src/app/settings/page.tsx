@@ -57,6 +57,10 @@ export default function SettingsPage() {
   // Integrations
   const [shopifyConnected, setShopifyConnected] = useState(false);
   const [shopifyShop, setShopifyShop] = useState('');
+  const [testingWebhook, setTestingWebhook] = useState(false);
+  const [webhookTestResult, setWebhookTestResult] = useState<{
+    webhook_registered: boolean; webhook_address?: string; error?: string;
+  } | null>(null);
   const [shopifyModalOpen, setShopifyModalOpen] = useState(false);
   const [shopifyStoreInput, setShopifyStoreInput] = useState('');
   const [copiedWebhookUrl, setCopiedWebhookUrl] = useState<string | null>(null);
@@ -213,6 +217,22 @@ export default function SettingsPage() {
       setShopifyShop('');
     } catch (err: any) {
       alert(err.response?.data?.message || 'Failed to disconnect');
+    }
+  };
+
+  const testShopifyWebhook = async () => {
+    setTestingWebhook(true);
+    setWebhookTestResult(null);
+    try {
+      const res = await shopifyApi.testWebhook();
+      setWebhookTestResult(res.data);
+    } catch (err: any) {
+      setWebhookTestResult({
+        webhook_registered: false,
+        error: err.response?.data?.error || 'Test failed',
+      });
+    } finally {
+      setTestingWebhook(false);
     }
   };
 
@@ -563,9 +583,29 @@ export default function SettingsPage() {
                 )}
               </div>
               {shopifyConnected && (
-                <p className="mt-3 text-xs text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/20 rounded-lg px-3 py-2">
-                  ✅ Orders from {shopifyShop} are being automatically scored
-                </p>
+                <div className="mt-3">
+                  <p className="text-xs text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/20 rounded-lg px-3 py-2">
+                    ✅ Orders from {shopifyShop} are being automatically scored
+                  </p>
+                  <button
+                    onClick={testShopifyWebhook}
+                    disabled={testingWebhook}
+                    className="mt-2 text-xs text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+                  >
+                    {testingWebhook ? 'Checking...' : 'Test Webhook'}
+                  </button>
+                  {webhookTestResult && (
+                    <div className={`mt-2 rounded-lg px-3 py-2 text-xs ${
+                      webhookTestResult.webhook_registered
+                        ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400'
+                        : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400'
+                    }`}>
+                      {webhookTestResult.webhook_registered
+                        ? `Webhook active — ${webhookTestResult.webhook_address}`
+                        : webhookTestResult.error || 'Webhook not found on Shopify'}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
 
