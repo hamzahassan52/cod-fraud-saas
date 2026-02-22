@@ -93,6 +93,19 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(shopifyRoutes, { prefix: '/api/v1/shopify' });
   await app.register(scannerRoutes, { prefix: '/api/v1/scanner' });
 
+  // GET /api/v1/settings/thresholds
+  app.get('/api/v1/settings/thresholds', async (request, reply) => {
+    try { await (request as any).jwtVerify(); } catch { return reply.code(401).send({ error: 'Unauthorized' }); }
+    const tenantId = (request as any).user?.tenantId;
+    const { query: dbQuery } = await import('./db/connection');
+    const result = await dbQuery(`SELECT settings FROM tenants WHERE id = $1`, [tenantId]);
+    const settings = result.rows[0]?.settings || {};
+    return reply.send({
+      block_threshold: settings.blockThreshold ?? 70,
+      verify_threshold: settings.verifyThreshold ?? 40,
+    });
+  });
+
   // ---- Global Error Handler ----
   app.setErrorHandler((error, request, reply) => {
     const statusCode = error.statusCode || 500;
