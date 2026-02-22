@@ -80,7 +80,7 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
       values.push(params.platform);
     }
     if (params.search) {
-      whereClause += ` AND (o.customer_name ILIKE $${paramIdx} OR o.customer_phone ILIKE $${paramIdx} OR o.customer_email ILIKE $${paramIdx} OR o.external_order_id ILIKE $${paramIdx})`;
+      whereClause += ` AND (o.customer_name ILIKE $${paramIdx} OR o.customer_phone ILIKE $${paramIdx} OR o.customer_email ILIKE $${paramIdx} OR o.external_order_id ILIKE $${paramIdx} OR o.shipping_city ILIKE $${paramIdx} OR o.phone_normalized ILIKE $${paramIdx})`;
       values.push(`%${params.search}%`);
       paramIdx++;
     }
